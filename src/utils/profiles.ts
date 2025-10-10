@@ -170,7 +170,7 @@ export async function pullProfilesFromSupabaseToLocal(): Promise<void> {
     //     additional_costs: [{ category, description, amount, allocation_type, client_item_id? }]
     //   }
     // ]
-    const { data, error } = await supabase.rpc("list_profiles_with_items");
+    const { data, error } = await supabase.rpc<RemoteProfileRow[]>("list_profiles_with_items");
     if (error) {
       // Fallback: try a simpler list and skip items if unavailable
       console.warn("RPC list_profiles_with_items unavailable, attempting list_profiles. Error:", error?.message ?? error);
@@ -178,11 +178,11 @@ export async function pullProfilesFromSupabaseToLocal(): Promise<void> {
 
     let rows: RemoteProfileRow[] | null = null;
     if (!error && Array.isArray(data)) {
-      rows = data as RemoteProfileRow[];
+      rows = data;
     } else {
-      const { data: fallbackData, error: fallbackErr } = await supabase.rpc("list_profiles");
+      const { data: fallbackData, error: fallbackErr } = await supabase.rpc<RemoteProfileRow[]>("list_profiles");
       if (!fallbackErr && Array.isArray(fallbackData)) {
-        rows = fallbackData as RemoteProfileRow[];
+        rows = fallbackData;
       } else {
         console.warn("No profile listing RPCs available or returned.");
         return;
@@ -265,7 +265,7 @@ async function syncProfileToSupabase(profile: CakeProfile): Promise<void> {
     if (!uid) return; // only sync when authenticated
     const supabase = getSupabaseClient();
     // Upsert via public RPC to avoid schema restrictions on the JS client
-    const { data: rpcId, error: rpcErr } = await supabase.rpc("upsert_profile", {
+    const { data: rpcId, error: rpcErr } = await supabase.rpc<string>("upsert_profile", {
       p_client_id: profile.id,
       p_name: profile.name,
       p_number_of_cakes: Math.max(1, Math.floor(profile.inputs.numberOfCakes || 1)),
@@ -276,7 +276,7 @@ async function syncProfileToSupabase(profile: CakeProfile): Promise<void> {
       return;
     }
 
-    const profileId = rpcId as unknown as string;
+    const profileId = rpcId;
 
     // Replace ingredient rows via RPC
     const ingredientRows = (profile.inputs.ingredients || []).map((ing) => ({
@@ -284,11 +284,12 @@ async function syncProfileToSupabase(profile: CakeProfile): Promise<void> {
       cost: isFinite(ing.cost) ? ing.cost : 0,
       unit: ing.unit ?? null,
       client_item_id: ing.id ?? null,
-    }));
-    const { error: ingErr } = await supabase.rpc("replace_profile_ingredients", {
+    })) satisfies Record<string, unknown>[];
+    const ingredientPayload = {
       p_profile_id: profileId,
-      p_items: ingredientRows as unknown as object, // jsonb
-    });
+      p_items: ingredientRows,
+    } satisfies Record<string, unknown>;
+    const { error: ingErr } = await supabase.rpc("replace_profile_ingredients", ingredientPayload);
     if (ingErr) {
       console.error("Failed to replace ingredients:", ingErr?.message ?? ingErr, ingErr);
     }
@@ -299,11 +300,12 @@ async function syncProfileToSupabase(profile: CakeProfile): Promise<void> {
       amount: isFinite(c.amount) ? c.amount : 0,
       allocation_type: c.allocationType,
       client_item_id: c.id ?? null,
-    }));
-    const { error: costErr } = await supabase.rpc("replace_profile_additional_costs", {
+    })) satisfies Record<string, unknown>[];
+    const costPayload = {
       p_profile_id: profileId,
-      p_items: costRows as unknown as object,
-    });
+      p_items: costRows,
+    } satisfies Record<string, unknown>;
+    const { error: costErr } = await supabase.rpc("replace_profile_additional_costs", costPayload);
     if (costErr) {
       console.error("Failed to replace additional costs:", costErr?.message ?? costErr, costErr);
     }
@@ -334,5 +336,4 @@ async function deleteProfileFromSupabase(clientId: string): Promise<void> {
     console.error("Failed to delete profile in Supabase:", e);
   }
 }
-
 
