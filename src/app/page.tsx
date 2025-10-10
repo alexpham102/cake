@@ -16,7 +16,6 @@ import { saveCakeProfile, getCakeProfile, syncAllLocalCakeProfilesToSupabase, pu
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { USER_COOKIE_NAME } from "@/lib/auth";
 
 export default function Home() {
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);

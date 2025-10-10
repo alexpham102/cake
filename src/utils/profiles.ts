@@ -16,6 +16,37 @@ export interface CakeProfile {
 
 const STORAGE_KEY = "cake_pricing_profiles_v1";
 
+// Remote shapes returned by Supabase RPCs. These are intentionally permissive
+// to accommodate differing column/property names across RPCs.
+type RemoteIngredientRow = {
+  client_item_id?: string | null;
+  name?: string | null;
+  cost?: number | string | null;
+  unit?: string | null;
+};
+
+type RemoteAdditionalCostRow = {
+  client_item_id?: string | null;
+  category?: string | null;
+  description?: string | null;
+  amount?: number | string | null;
+  allocation_type?: "batch" | "per-cake" | string | null;
+  allocationType?: "batch" | "per-cake" | string | null;
+};
+
+type RemoteProfileRow = {
+  client_id?: string | null;
+  id?: string | null;
+  clientId?: string | null;
+  name?: string | null;
+  number_of_cakes?: number | string | null;
+  numberOfCakes?: number | string | null;
+  profit_percentage?: number | string | null;
+  profitPercentage?: number | string | null;
+  ingredients?: RemoteIngredientRow[] | null;
+  additional_costs?: RemoteAdditionalCostRow[] | null;
+};
+
 function isBrowser(): boolean {
   return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
 }
@@ -142,19 +173,17 @@ export async function pullProfilesFromSupabaseToLocal(): Promise<void> {
     const { data, error } = await supabase.rpc("list_profiles_with_items");
     if (error) {
       // Fallback: try a simpler list and skip items if unavailable
-      // eslint-disable-next-line no-console
       console.warn("RPC list_profiles_with_items unavailable, attempting list_profiles. Error:", error?.message ?? error);
     }
 
-    let rows: any[] | null = null;
+    let rows: RemoteProfileRow[] | null = null;
     if (!error && Array.isArray(data)) {
-      rows = data as any[];
+      rows = data as RemoteProfileRow[];
     } else {
       const { data: fallbackData, error: fallbackErr } = await supabase.rpc("list_profiles");
       if (!fallbackErr && Array.isArray(fallbackData)) {
-        rows = fallbackData as any[];
+        rows = fallbackData as RemoteProfileRow[];
       } else {
-        // eslint-disable-next-line no-console
         console.warn("No profile listing RPCs available or returned.");
         return;
       }
@@ -175,7 +204,7 @@ export async function pullProfilesFromSupabaseToLocal(): Promise<void> {
       const profitPercentage = Math.max(0, Math.min(1000, Number(r.profit_percentage ?? r.profitPercentage ?? 0)));
 
       const ingredients = Array.isArray(r.ingredients)
-        ? r.ingredients.map((ing: any) => ({
+        ? r.ingredients.map((ing: RemoteIngredientRow) => ({
             id: ing.client_item_id ?? undefined,
             name: String(ing.name ?? ""),
             cost: Number(ing.cost ?? 0),
@@ -184,7 +213,7 @@ export async function pullProfilesFromSupabaseToLocal(): Promise<void> {
         : [];
 
       const additionalCosts = Array.isArray(r.additional_costs)
-        ? r.additional_costs.map((c: any) => ({
+        ? r.additional_costs.map((c: RemoteAdditionalCostRow) => ({
             id: c.client_item_id ?? undefined,
             category: String(c.category ?? "other"),
             description: c.description ?? undefined,
@@ -226,7 +255,6 @@ export async function pullProfilesFromSupabaseToLocal(): Promise<void> {
     const survivors = readAll().filter((p) => !receivedIds.has(p.id));
     writeAll([...toUpsert, ...survivors].sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1)));
   } catch (e) {
-    // eslint-disable-next-line no-console
     console.error("Unexpected error pulling profiles:", e);
   }
 }
@@ -244,7 +272,6 @@ async function syncProfileToSupabase(profile: CakeProfile): Promise<void> {
       p_profit_percentage: Math.max(0, Math.min(1000, profile.inputs.profitPercentage || 0)),
     });
     if (rpcErr || !rpcId) {
-      // eslint-disable-next-line no-console
       console.error("Failed to upsert profile:", rpcErr?.message ?? rpcErr, rpcErr);
       return;
     }
@@ -263,7 +290,6 @@ async function syncProfileToSupabase(profile: CakeProfile): Promise<void> {
       p_items: ingredientRows as unknown as object, // jsonb
     });
     if (ingErr) {
-      // eslint-disable-next-line no-console
       console.error("Failed to replace ingredients:", ingErr?.message ?? ingErr, ingErr);
     }
 
@@ -279,11 +305,9 @@ async function syncProfileToSupabase(profile: CakeProfile): Promise<void> {
       p_items: costRows as unknown as object,
     });
     if (costErr) {
-      // eslint-disable-next-line no-console
       console.error("Failed to replace additional costs:", costErr?.message ?? costErr, costErr);
     }
   } catch (e) {
-    // eslint-disable-next-line no-console
     console.error("Unexpected error syncing profile:", e);
   }
 }
@@ -293,7 +317,6 @@ export async function syncAllLocalCakeProfilesToSupabase(): Promise<void> {
   if (!uid) return;
   const all = readAll();
   for (const p of all) {
-    // eslint-disable-next-line no-await-in-loop
     await syncProfileToSupabase(p);
   }
 }
@@ -305,11 +328,9 @@ async function deleteProfileFromSupabase(clientId: string): Promise<void> {
     const supabase = getSupabaseClient();
     const { error } = await supabase.rpc("delete_profile_by_client_id", { p_client_id: clientId });
     if (error) {
-      // eslint-disable-next-line no-console
       console.error("Failed to delete profile in Supabase:", error?.message ?? error, error);
     }
   } catch (e) {
-    // eslint-disable-next-line no-console
     console.error("Failed to delete profile in Supabase:", e);
   }
 }
