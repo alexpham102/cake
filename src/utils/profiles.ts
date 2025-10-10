@@ -265,11 +265,20 @@ async function syncProfileToSupabase(profile: CakeProfile): Promise<void> {
     if (!uid) return; // only sync when authenticated
     const supabase = getSupabaseClient();
     // Upsert via public RPC to avoid schema restrictions on the JS client
+    const cakesCount = Math.max(1, Math.floor(profile.inputs.numberOfCakes || 1));
+    const rawProfit = Math.max(0, Math.min(1000, profile.inputs.profitPercentage || 0));
+    
+    // WORKAROUND: Disambiguate overloaded RPC by ensuring decimal precision.
+    // Supabase has both integer and numeric overloads. Force numeric by adding
+    // a tiny decimal that gets rounded in display but disambiguates the call.
+    // TODO: Remove integer overload from database, then remove this workaround.
+    const profitForRpc = Number.isInteger(rawProfit) ? rawProfit + 0.001 : rawProfit;
+
     const { data: rpcId, error: rpcErr } = await supabase.rpc("upsert_profile", {
       p_client_id: profile.id,
       p_name: profile.name,
-      p_number_of_cakes: Math.max(1, Math.floor(profile.inputs.numberOfCakes || 1)),
-      p_profit_percentage: Math.max(0, Math.min(1000, profile.inputs.profitPercentage || 0)),
+      p_number_of_cakes: cakesCount,
+      p_profit_percentage: profitForRpc,
     });
     if (rpcErr || !rpcId) {
       console.error("Failed to upsert profile:", rpcErr?.message ?? rpcErr, rpcErr);
@@ -278,7 +287,7 @@ async function syncProfileToSupabase(profile: CakeProfile): Promise<void> {
 
     const profileId = rpcId;
 
-    // Replace ingredient rows via RPC
+    // Replace ingredient rows via RPC (best-effort, gracefully handle missing RPCs)
     const ingredientRows = (profile.inputs.ingredients || []).map((ing) => ({
       name: ing.name,
       cost: isFinite(ing.cost) ? ing.cost : 0,
@@ -291,7 +300,10 @@ async function syncProfileToSupabase(profile: CakeProfile): Promise<void> {
     } satisfies Record<string, unknown>;
     const { error: ingErr } = await supabase.rpc("replace_profile_ingredients", ingredientPayload);
     if (ingErr) {
-      console.error("Failed to replace ingredients:", ingErr?.message ?? ingErr, ingErr);
+      // Only log non-"not found" errors - missing RPCs are expected in some setups
+      if (ingErr.message !== "not found") {
+        console.error("Failed to replace ingredients:", ingErr?.message ?? ingErr, ingErr);
+      }
     }
 
     const costRows = (profile.inputs.additionalCosts || []).map((c) => ({
@@ -307,7 +319,10 @@ async function syncProfileToSupabase(profile: CakeProfile): Promise<void> {
     } satisfies Record<string, unknown>;
     const { error: costErr } = await supabase.rpc("replace_profile_additional_costs", costPayload);
     if (costErr) {
-      console.error("Failed to replace additional costs:", costErr?.message ?? costErr, costErr);
+      // Only log non-"not found" errors - missing RPCs are expected in some setups
+      if (costErr.message !== "not found") {
+        console.error("Failed to replace additional costs:", costErr?.message ?? costErr, costErr);
+      }
     }
   } catch (e) {
     console.error("Unexpected error syncing profile:", e);

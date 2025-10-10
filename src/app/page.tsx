@@ -152,19 +152,13 @@ export default function Home() {
           <div>
             <div className="flex items-center gap-2">
             <h1 className="text-2xl sm:text-3xl font-bold">Cake Pricing Calculator</h1>
-            <Button asChild variant="outline">
-              <Link href="/saved">All Cakes</Link>
-            </Button>
             </div>
             <p className="text-gray-600">Calculate optimal selling price based on costs and desired margin.</p>
             
           </div>
           <div className="flex flex-row items-center gap-2">
             <Button onClick={handleSave}>
-              {saveStatus === "Saved" ? "Saved" : "Save"}
-            </Button>
-            <Button asChild variant="outline">
-              <Link href="/login?logout=1">Logout</Link>
+              {saveStatus === "Saved" ? "Saved" : "Save This Cake"}
             </Button>
           </div>
         </header>
@@ -177,7 +171,7 @@ export default function Home() {
                 {!isEditingName ? (
                   <div className="flex items-center gap-3 flex-1 min-w-0 justify-between">
                     <div className="font-medium text-xl truncate">{cakeName || "Untitled Cake"}</div>
-                    <Button variant="outline" onClick={startEditName}>Edit</Button>
+                    <Button variant="outline" onClick={startEditName}>Edit Cake Name</Button>
                   </div>
                 ) : (
                   <div className="flex items-center gap-2 flex-1 min-w-0">
