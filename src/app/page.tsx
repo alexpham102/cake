@@ -3,7 +3,6 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { useEffect } from "react";
-import { useSearchParams } from "next/navigation";
 import IngredientForm from "@/components/IngredientForm";
 import IngredientList from "@/components/IngredientList";
 import AdditionalCostForm from "@/components/AdditionalCostForm";
@@ -13,10 +12,11 @@ import ProfitCalculator from "@/components/ProfitCalculator";
 import ResultsSummary from "@/components/ResultsSummary";
 import { AdditionalCostItem, Ingredient } from "@/types";
 import { calculateBreakdown } from "@/utils/calculations";
-import { saveCakeProfile, getCakeProfile, syncAllLocalCakeProfilesToSupabase } from "@/utils/profiles";
+import { saveCakeProfile, getCakeProfile, syncAllLocalCakeProfilesToSupabase, pullProfilesFromSupabaseToLocal } from "@/utils/profiles";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { USER_COOKIE_NAME } from "@/lib/auth";
 
 export default function Home() {
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
@@ -26,7 +26,6 @@ export default function Home() {
   const [cakeName, setCakeName] = useState<string>("");
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
   const [currentProfileId, setCurrentProfileId] = useState<string | null>(null);
-  const searchParams = useSearchParams();
   const [isEditingName, setIsEditingName] = useState<boolean>(false);
   const [tempName, setTempName] = useState<string>("");
 
@@ -97,10 +96,14 @@ export default function Home() {
   }
 
   useEffect(() => {
-    // kick off initial background sync of any existing local profiles
+    // Kick off initial background sync of any existing local profiles
     void syncAllLocalCakeProfilesToSupabase();
+    // Also pull remote profiles to keep local fresh when switching browsers/devices
+    void pullProfilesFromSupabaseToLocal();
 
-    const id = searchParams.get("id");
+    const id = typeof window !== "undefined"
+      ? new URLSearchParams(window.location.search).get("id")
+      : null;
     if (!id) return;
     const profile = getCakeProfile(id);
     if (!profile) return;
@@ -112,7 +115,7 @@ export default function Home() {
     setCurrentProfileId(profile.id);
     setIsEditingName(false);
     setTempName("");
-  }, [searchParams]);
+  }, []);
 
   function startEditName() {
     setTempName(cakeName);
@@ -160,6 +163,9 @@ export default function Home() {
           <div className="flex flex-row items-center gap-2">
             <Button onClick={handleSave}>
               {saveStatus === "Saved" ? "Saved" : "Save"}
+            </Button>
+            <Button asChild variant="outline">
+              <Link href="/login?logout=1">Logout</Link>
             </Button>
           </div>
         </header>

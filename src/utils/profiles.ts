@@ -3,6 +3,7 @@
 import { CostBreakdownPerCake, PricingInputs } from "@/types";
 import { calculateBreakdown } from "@/utils/calculations";
 import { getSupabaseClient } from "@/lib/supabaseClient";
+import { readUserIdFromBrowser } from "@/lib/auth";
 
 export interface CakeProfile {
   id: string;
@@ -115,8 +116,125 @@ export function saveCakeProfile(params: {
   return newProfile;
 }
 
+/**
+ * Pull profiles from Supabase and merge them into local storage so saved cakes
+ * appear across browsers/devices. This is best-effort and will no-op if not authenticated
+ * or if the RPCs are unavailable server-side.
+ */
+export async function pullProfilesFromSupabaseToLocal(): Promise<void> {
+  try {
+    const uid = readUserIdFromBrowser();
+    if (!uid) return;
+    const supabase = getSupabaseClient();
+
+    // Try a combined RPC that returns profiles with nested items
+    // Expected shape (best effort):
+    // [
+    //   {
+    //     client_id: string,
+    //     name: string,
+    //     number_of_cakes: number,
+    //     profit_percentage: number,
+    //     ingredients: [{ name, cost, unit, client_item_id? }],
+    //     additional_costs: [{ category, description, amount, allocation_type, client_item_id? }]
+    //   }
+    // ]
+    const { data, error } = await supabase.rpc("list_profiles_with_items");
+    if (error) {
+      // Fallback: try a simpler list and skip items if unavailable
+      // eslint-disable-next-line no-console
+      console.warn("RPC list_profiles_with_items unavailable, attempting list_profiles. Error:", error?.message ?? error);
+    }
+
+    let rows: any[] | null = null;
+    if (!error && Array.isArray(data)) {
+      rows = data as any[];
+    } else {
+      const { data: fallbackData, error: fallbackErr } = await supabase.rpc("list_profiles");
+      if (!fallbackErr && Array.isArray(fallbackData)) {
+        rows = fallbackData as any[];
+      } else {
+        // eslint-disable-next-line no-console
+        console.warn("No profile listing RPCs available or returned.");
+        return;
+      }
+    }
+
+    if (!rows || rows.length === 0) return;
+
+    const local = readAll();
+    const byId = new Map(local.map((p) => [p.id, p] as const));
+    const now = new Date().toISOString();
+
+    const toUpsert: CakeProfile[] = [];
+    for (const r of rows) {
+      const clientId: string = r.client_id ?? r.id ?? r.clientId;
+      if (!clientId) continue;
+
+      const numberOfCakes = Math.max(1, Math.floor(Number(r.number_of_cakes ?? r.numberOfCakes ?? 1)));
+      const profitPercentage = Math.max(0, Math.min(1000, Number(r.profit_percentage ?? r.profitPercentage ?? 0)));
+
+      const ingredients = Array.isArray(r.ingredients)
+        ? r.ingredients.map((ing: any) => ({
+            id: ing.client_item_id ?? undefined,
+            name: String(ing.name ?? ""),
+            cost: Number(ing.cost ?? 0),
+            unit: ing.unit ?? undefined,
+          }))
+        : [];
+
+      const additionalCosts = Array.isArray(r.additional_costs)
+        ? r.additional_costs.map((c: any) => ({
+            id: c.client_item_id ?? undefined,
+            category: String(c.category ?? "other"),
+            description: c.description ?? undefined,
+            amount: Number(c.amount ?? 0),
+            allocationType: (c.allocation_type ?? c.allocationType ?? "per-cake") as "batch" | "per-cake",
+          }))
+        : [];
+
+      const inputs: PricingInputs = {
+        ingredients,
+        additionalCosts,
+        numberOfCakes,
+        profitPercentage,
+      };
+
+      const existing = byId.get(clientId);
+      const merged: CakeProfile = existing
+        ? {
+            ...existing,
+            name: String(r.name ?? existing.name ?? "Untitled Cake"),
+            inputs,
+            breakdown: calculateBreakdown(inputs),
+            updatedAt: now,
+          }
+        : {
+            id: clientId,
+            name: String(r.name ?? "Untitled Cake"),
+            inputs,
+            breakdown: calculateBreakdown(inputs),
+            createdAt: now,
+            updatedAt: now,
+          };
+
+      toUpsert.push(merged);
+    }
+
+    // Merge into local: prefer the merged versions for ids we received, keep others
+    const receivedIds = new Set(toUpsert.map((p) => p.id));
+    const survivors = readAll().filter((p) => !receivedIds.has(p.id));
+    writeAll([...toUpsert, ...survivors].sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1)));
+  } catch (e) {
+    // eslint-disable-next-line no-console
+    console.error("Unexpected error pulling profiles:", e);
+  }
+}
+
 async function syncProfileToSupabase(profile: CakeProfile): Promise<void> {
   try {
+    const uid = readUserIdFromBrowser();
+    if (!uid) return; // only sync when authenticated
     const supabase = getSupabaseClient();
     // Upsert via public RPC to avoid schema restrictions on the JS client
     const { data: rpcId, error: rpcErr } = await supabase.rpc("upsert_profile", {
@@ -171,6 +289,8 @@ async function syncProfileToSupabase(profile: CakeProfile): Promise<void> {
 }
 
 export async function syncAllLocalCakeProfilesToSupabase(): Promise<void> {
+  const uid = readUserIdFromBrowser();
+  if (!uid) return;
   const all = readAll();
   for (const p of all) {
     // eslint-disable-next-line no-await-in-loop
@@ -180,6 +300,8 @@ export async function syncAllLocalCakeProfilesToSupabase(): Promise<void> {
 
 async function deleteProfileFromSupabase(clientId: string): Promise<void> {
   try {
+    const uid = readUserIdFromBrowser();
+    if (!uid) return;
     const supabase = getSupabaseClient();
     const { error } = await supabase.rpc("delete_profile_by_client_id", { p_client_id: clientId });
     if (error) {

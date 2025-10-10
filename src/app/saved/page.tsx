@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { listCakeProfiles, deleteCakeProfile } from "@/utils/profiles";
+import { listCakeProfiles, deleteCakeProfile, pullProfilesFromSupabaseToLocal } from "@/utils/profiles";
 import { useEffect, useState } from "react";
 import { formatMoney } from "@/utils/calculations";
 import { Button } from "@/components/ui/button";
@@ -12,8 +12,16 @@ export default function SavedCakesPage() {
   const [profiles, setProfiles] = useState<CakeProfile[]>([]);
 
   useEffect(() => {
-    // Refresh on mount in case storage changed elsewhere
-    setProfiles(listCakeProfiles());
+    let cancelled = false;
+    async function init() {
+      // Pull remote profiles so saved cakes appear across browsers
+      await pullProfilesFromSupabaseToLocal();
+      if (!cancelled) setProfiles(listCakeProfiles());
+    }
+    void init();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   function handleDelete(id: string) {
