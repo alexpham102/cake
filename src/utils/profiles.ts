@@ -170,7 +170,7 @@ export async function pullProfilesFromSupabaseToLocal(): Promise<void> {
     //     additional_costs: [{ category, description, amount, allocation_type, client_item_id? }]
     //   }
     // ]
-    const { data, error } = await supabase.rpc<RemoteProfileRow[]>("list_profiles_with_items");
+    const { data, error } = await supabase.rpc("list_profiles_with_items");
     if (error) {
       // Fallback: try a simpler list and skip items if unavailable
       console.warn("RPC list_profiles_with_items unavailable, attempting list_profiles. Error:", error?.message ?? error);
@@ -180,7 +180,7 @@ export async function pullProfilesFromSupabaseToLocal(): Promise<void> {
     if (!error && Array.isArray(data)) {
       rows = data;
     } else {
-      const { data: fallbackData, error: fallbackErr } = await supabase.rpc<RemoteProfileRow[]>("list_profiles");
+      const { data: fallbackData, error: fallbackErr } = await supabase.rpc("list_profiles");
       if (!fallbackErr && Array.isArray(fallbackData)) {
         rows = fallbackData;
       } else {
@@ -197,15 +197,15 @@ export async function pullProfilesFromSupabaseToLocal(): Promise<void> {
 
     const toUpsert: CakeProfile[] = [];
     for (const r of rows) {
-      const clientId: string = r.client_id ?? r.id ?? r.clientId;
+      const clientId = (r.client_id ?? r.id ?? r.clientId) ?? "";
       if (!clientId) continue;
 
       const numberOfCakes = Math.max(1, Math.floor(Number(r.number_of_cakes ?? r.numberOfCakes ?? 1)));
       const profitPercentage = Math.max(0, Math.min(1000, Number(r.profit_percentage ?? r.profitPercentage ?? 0)));
 
       const ingredients = Array.isArray(r.ingredients)
-        ? r.ingredients.map((ing: RemoteIngredientRow) => ({
-            id: ing.client_item_id ?? undefined,
+        ? r.ingredients.map((ing: RemoteIngredientRow, idx: number) => ({
+            id: String(ing.client_item_id ?? `${clientId}-ing-${idx}`),
             name: String(ing.name ?? ""),
             cost: Number(ing.cost ?? 0),
             unit: ing.unit ?? undefined,
@@ -213,8 +213,8 @@ export async function pullProfilesFromSupabaseToLocal(): Promise<void> {
         : [];
 
       const additionalCosts = Array.isArray(r.additional_costs)
-        ? r.additional_costs.map((c: RemoteAdditionalCostRow) => ({
-            id: c.client_item_id ?? undefined,
+        ? r.additional_costs.map((c: RemoteAdditionalCostRow, idx: number) => ({
+            id: String(c.client_item_id ?? `${clientId}-cost-${idx}`),
             category: String(c.category ?? "other"),
             description: c.description ?? undefined,
             amount: Number(c.amount ?? 0),
@@ -265,7 +265,7 @@ async function syncProfileToSupabase(profile: CakeProfile): Promise<void> {
     if (!uid) return; // only sync when authenticated
     const supabase = getSupabaseClient();
     // Upsert via public RPC to avoid schema restrictions on the JS client
-    const { data: rpcId, error: rpcErr } = await supabase.rpc<string>("upsert_profile", {
+    const { data: rpcId, error: rpcErr } = await supabase.rpc("upsert_profile", {
       p_client_id: profile.id,
       p_name: profile.name,
       p_number_of_cakes: Math.max(1, Math.floor(profile.inputs.numberOfCakes || 1)),
