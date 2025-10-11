@@ -3,7 +3,6 @@
 import { CostBreakdownPerCake, PricingInputs } from "@/types";
 import { calculateBreakdown } from "@/utils/calculations";
 import { getSupabaseClient } from "@/lib/supabaseClient";
-import { readUserIdFromBrowser } from "@/lib/auth";
 
 export interface CakeProfile {
   id: string;
@@ -154,9 +153,9 @@ export function saveCakeProfile(params: {
  */
 export async function pullProfilesFromSupabaseToLocal(): Promise<void> {
   try {
-    const uid = readUserIdFromBrowser();
-    if (!uid) return;
     const supabase = getSupabaseClient();
+    const { data: sessionResult } = await supabase.auth.getSession();
+    if (!sessionResult?.session) return;
 
     // Try a combined RPC that returns profiles with nested items
     // Expected shape (best effort):
@@ -261,9 +260,9 @@ export async function pullProfilesFromSupabaseToLocal(): Promise<void> {
 
 async function syncProfileToSupabase(profile: CakeProfile): Promise<void> {
   try {
-    const uid = readUserIdFromBrowser();
-    if (!uid) return; // only sync when authenticated
     const supabase = getSupabaseClient();
+    const { data: sessionResult } = await supabase.auth.getSession();
+    if (!sessionResult?.session) return; // only sync when authenticated
     // Upsert via public RPC to avoid schema restrictions on the JS client
     const cakesCount = Math.max(1, Math.floor(profile.inputs.numberOfCakes || 1));
     const rawProfit = Math.max(0, Math.min(1000, profile.inputs.profitPercentage || 0));
@@ -330,8 +329,9 @@ async function syncProfileToSupabase(profile: CakeProfile): Promise<void> {
 }
 
 export async function syncAllLocalCakeProfilesToSupabase(): Promise<void> {
-  const uid = readUserIdFromBrowser();
-  if (!uid) return;
+  const supabase = getSupabaseClient();
+  const { data: sessionResult } = await supabase.auth.getSession();
+  if (!sessionResult?.session) return;
   const all = readAll();
   for (const p of all) {
     await syncProfileToSupabase(p);
@@ -340,9 +340,9 @@ export async function syncAllLocalCakeProfilesToSupabase(): Promise<void> {
 
 async function deleteProfileFromSupabase(clientId: string): Promise<void> {
   try {
-    const uid = readUserIdFromBrowser();
-    if (!uid) return;
     const supabase = getSupabaseClient();
+    const { data: sessionResult } = await supabase.auth.getSession();
+    if (!sessionResult?.session) return;
     const { error } = await supabase.rpc("delete_profile_by_client_id", { p_client_id: clientId });
     if (error) {
       console.error("Failed to delete profile in Supabase:", error?.message ?? error, error);

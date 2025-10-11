@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import Link from "next/link";
 import { useEffect } from "react";
 import IngredientForm from "@/components/IngredientForm";
 import IngredientList from "@/components/IngredientList";
@@ -12,10 +11,11 @@ import ProfitCalculator from "@/components/ProfitCalculator";
 import ResultsSummary from "@/components/ResultsSummary";
 import { AdditionalCostItem, Ingredient } from "@/types";
 import { calculateBreakdown } from "@/utils/calculations";
-import { saveCakeProfile, getCakeProfile, syncAllLocalCakeProfilesToSupabase, pullProfilesFromSupabaseToLocal } from "@/utils/profiles";
+import { saveCakeProfile, syncAllLocalCakeProfilesToSupabase, pullProfilesFromSupabaseToLocal } from "@/utils/profiles";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { getSupabaseClient } from "@/lib/supabaseClient";
 
 export default function Home() {
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
@@ -99,21 +99,6 @@ export default function Home() {
     void syncAllLocalCakeProfilesToSupabase();
     // Also pull remote profiles to keep local fresh when switching browsers/devices
     void pullProfilesFromSupabaseToLocal();
-
-    const id = typeof window !== "undefined"
-      ? new URLSearchParams(window.location.search).get("id")
-      : null;
-    if (!id) return;
-    const profile = getCakeProfile(id);
-    if (!profile) return;
-    setIngredients(profile.inputs.ingredients || []);
-    setAdditionalCosts(profile.inputs.additionalCosts || []);
-    setNumberOfCakes(profile.inputs.numberOfCakes || 1);
-    setProfitPercentage(profile.inputs.profitPercentage || 0);
-    setCakeName(profile.name || "");
-    setCurrentProfileId(profile.id);
-    setIsEditingName(false);
-    setTempName("");
   }, []);
 
   function startEditName() {
@@ -144,6 +129,8 @@ export default function Home() {
     setSaveStatus("Saved");
     window.setTimeout(() => setSaveStatus(null), 2000);
   }
+
+
 
   return (
     <div className="min-h-screen p-6 sm:p-10">

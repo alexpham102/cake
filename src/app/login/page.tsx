@@ -5,33 +5,51 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { USER_COOKIE_NAME, isValidPassword, clearUserCookieInBrowser } from "@/lib/auth";
+import { signInWithEmail, signUpWithEmail, signOut } from "@/lib/auth";
 
 function LoginInner() {
   const router = useRouter();
   const params = useSearchParams();
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
+  const [mode, setMode] = useState<"signin" | "signup">("signin");
 
   useEffect(() => {
     if (params.get("logout") === "1") {
-      clearUserCookieInBrowser();
-      setSuccess("You have been logged out.");
+      (async () => {
+        try {
+          await signOut();
+          setSuccess("You have been logged out.");
+        } catch (e: any) {
+          setError(e?.message || "Failed to log out");
+        }
+      })();
     }
   }, [params]);
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
-    const value = password.trim();
-    if (!isValidPassword(value)) {
-      setError("Incorrect password. Please try again.");
+    const emailValue = email.trim();
+    const passwordValue = password.trim();
+    if (!emailValue || !passwordValue) {
+      setError("Email and password are required.");
       return;
     }
-    const encoded = encodeURIComponent(value);
-    document.cookie = `${USER_COOKIE_NAME}=${encoded}; Path=/; Max-Age=31536000; SameSite=Lax`;
-    router.replace("/");
+    (async () => {
+      try {
+        if (mode === "signup") {
+          await signUpWithEmail(emailValue, passwordValue);
+        } else {
+          await signInWithEmail(emailValue, passwordValue);
+        }
+        router.replace("/");
+      } catch (e: any) {
+        setError(e?.message || "Authentication failed");
+      }
+    })();
   }
 
   return (
@@ -39,10 +57,19 @@ function LoginInner() {
       <div className="w-full max-w-md">
         <Card>
           <CardHeader>
-            <CardTitle className="text-2xl">Enter Password</CardTitle>
+            <CardTitle className="text-2xl">{mode === "signup" ? "Create account" : "Sign in"}</CardTitle>
           </CardHeader>
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <Input
+                  type="email"
+                  value={email}
+                  placeholder="Email"
+                  aria-label="Email"
+                  onChange={(e) => setEmail(e.target.value)}
+                />
+              </div>
               <div>
                 <Input
                   type="password"
@@ -58,8 +85,9 @@ function LoginInner() {
               {success ? (
                 <div className="text-sm text-green-600">{success}</div>
               ) : null}
-              <div className="flex justify-end">
-                <Button type="submit">Continue</Button>
+              <div className="flex items-center justify-between gap-2">
+                <Button type="button" variant="outline" onClick={() => setMode(mode === "signup" ? "signin" : "signup")}>{mode === "signup" ? "Have an account? Sign in" : "New here? Sign up"}</Button>
+                <Button type="submit">{mode === "signup" ? "Sign up" : "Sign in"}</Button>
               </div>
             </form>
           </CardContent>
