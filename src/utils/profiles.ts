@@ -329,12 +329,17 @@ async function syncProfileToSupabase(profile: CakeProfile): Promise<void> {
 }
 
 export async function syncAllLocalCakeProfilesToSupabase(): Promise<void> {
-  const supabase = getSupabaseClient();
-  const { data: sessionResult } = await supabase.auth.getSession();
-  if (!sessionResult?.session) return;
-  const all = readAll();
-  for (const p of all) {
-    await syncProfileToSupabase(p);
+  try {
+    const supabase = getSupabaseClient();
+    const { data: sessionResult } = await supabase.auth.getSession();
+    if (!sessionResult?.session) return;
+    const all = readAll();
+    for (const p of all) {
+      await syncProfileToSupabase(p);
+    }
+  } catch {
+    // Gracefully ignore when Supabase is not configured
+    return;
   }
 }
 

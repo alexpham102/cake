@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { useEffect } from "react";
+import { useSearchParams } from "next/navigation";
 import IngredientForm from "@/components/IngredientForm";
 import IngredientList from "@/components/IngredientList";
 import AdditionalCostForm from "@/components/AdditionalCostForm";
@@ -27,6 +28,7 @@ export default function Home() {
   const [currentProfileId, setCurrentProfileId] = useState<string | null>(null);
   const [isEditingName, setIsEditingName] = useState<boolean>(false);
   const [tempName, setTempName] = useState<string>("");
+  const params = useSearchParams();
 
   function generateId(prefix: string) {
     return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -100,6 +102,25 @@ export default function Home() {
     // Also pull remote profiles to keep local fresh when switching browsers/devices
     void pullProfilesFromSupabaseToLocal();
   }, []);
+
+  // Load a profile from URL if id is provided
+  useEffect(() => {
+    const id = params?.get("id");
+    if (!id) return;
+    try {
+      const { getCakeProfile } = require("@/utils/profiles");
+      const p = getCakeProfile(id);
+      if (!p) return;
+      setIngredients(p.inputs.ingredients || []);
+      setAdditionalCosts(p.inputs.additionalCosts || []);
+      setNumberOfCakes(p.inputs.numberOfCakes || 1);
+      setProfitPercentage(p.inputs.profitPercentage || 0);
+      setCakeName(p.name || "");
+      setCurrentProfileId(p.id);
+    } catch {
+      // ignore
+    }
+  }, [params]);
 
   function startEditName() {
     setTempName(cakeName);
