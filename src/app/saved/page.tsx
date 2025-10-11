@@ -34,7 +34,7 @@ export default function SavedCakesPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [router]);
 
   if (authorized === false) return null;
 

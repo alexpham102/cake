@@ -22,8 +22,8 @@ function LoginInner() {
         try {
           await signOut();
           setSuccess("You have been logged out.");
-        } catch (e: any) {
-          setError(e?.message || "Failed to log out");
+        } catch (e: unknown) {
+          setError(e instanceof Error ? e.message : "Failed to log out");
         }
       })();
     }
@@ -46,8 +46,8 @@ function LoginInner() {
           await signInWithEmail(emailValue, passwordValue);
         }
         router.replace("/");
-      } catch (e: any) {
-        setError(e?.message || "Authentication failed");
+      } catch (e: unknown) {
+        setError(e instanceof Error ? e.message : "Authentication failed");
       }
     })();
   }

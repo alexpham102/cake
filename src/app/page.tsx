@@ -15,7 +15,7 @@ import { saveCakeProfile, syncAllLocalCakeProfilesToSupabase, pullProfilesFromSu
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { getSupabaseClient } from "@/lib/supabaseClient";
+// removed unused import
 
 export default function Home() {
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
