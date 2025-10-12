@@ -15,37 +15,6 @@ export interface CakeProfile {
 
 const STORAGE_KEY = "cake_pricing_profiles_v1";
 
-// Remote shapes returned by Supabase RPCs. These are intentionally permissive
-// to accommodate differing column/property names across RPCs.
-type RemoteIngredientRow = {
-  client_item_id?: string | null;
-  name?: string | null;
-  cost?: number | string | null;
-  unit?: string | null;
-};
-
-type RemoteAdditionalCostRow = {
-  client_item_id?: string | null;
-  category?: string | null;
-  description?: string | null;
-  amount?: number | string | null;
-  allocation_type?: "batch" | "per-cake" | string | null;
-  allocationType?: "batch" | "per-cake" | string | null;
-};
-
-type RemoteProfileRow = {
-  client_id?: string | null;
-  id?: string | null;
-  clientId?: string | null;
-  name?: string | null;
-  number_of_cakes?: number | string | null;
-  numberOfCakes?: number | string | null;
-  profit_percentage?: number | string | null;
-  profitPercentage?: number | string | null;
-  ingredients?: RemoteIngredientRow[] | null;
-  additional_costs?: RemoteAdditionalCostRow[] | null;
-};
-
 function isBrowser(): boolean {
   return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
 }
@@ -155,109 +124,87 @@ export async function pullProfilesFromSupabaseToLocal(): Promise<void> {
   try {
     const supabase = getSupabaseClient();
     const { data: sessionResult } = await supabase.auth.getSession();
-    if (!sessionResult?.session) return;
+    const userId = sessionResult?.session?.user?.id;
+    if (!userId) return;
 
-    // Try a combined RPC that returns profiles with nested items
-    // Expected shape (best effort):
-    // [
-    //   {
-    //     client_id: string,
-    //     name: string,
-    //     number_of_cakes: number,
-    //     profit_percentage: number,
-    //     ingredients: [{ name, cost, unit, client_item_id? }],
-    //     additional_costs: [{ category, description, amount, allocation_type, client_item_id? }]
-    //   }
-    // ]
-    const { data, error } = await supabase.rpc("list_profiles_with_items");
+    const { data, error } = await supabase
+      .from("profiles")
+      .select(`
+        id,
+        client_id,
+        name,
+        number_of_cakes,
+        profit_percentage,
+        created_at,
+        updated_at,
+        profile_ingredients (
+          client_item_id,
+          name,
+          cost,
+          unit
+        ),
+        profile_additional_costs (
+          client_item_id,
+          category,
+          description,
+          amount,
+          allocation_type
+        )
+      `)
+      .eq("user_id", userId)
+      .order("updated_at", { ascending: false });
+
     if (error) {
-      // Fallback: try a simpler list and skip items if unavailable
-      console.warn("RPC list_profiles_with_items unavailable, attempting list_profiles. Error:", error?.message ?? error);
+      console.error("Failed to fetch profiles from Supabase:", error);
+      return;
     }
+    if (!Array.isArray(data)) return;
 
-    let rows: RemoteProfileRow[] | null = null;
-    if (!error && Array.isArray(data)) {
-      rows = data;
-    } else {
-      const { data: fallbackData, error: fallbackErr } = await supabase.rpc("list_profiles");
-      if (!fallbackErr && Array.isArray(fallbackData)) {
-        rows = fallbackData;
-      } else {
-        console.warn("No profile listing RPCs available or returned.");
-        return;
-      }
-    }
-
-    if (!rows || rows.length === 0) return;
-
-    const local = readAll();
-    const byId = new Map(local.map((p) => [p.id, p] as const));
-    const now = new Date().toISOString();
-
-    const toUpsert: CakeProfile[] = [];
-    for (const r of rows) {
-      const clientId = (r.client_id ?? r.id ?? r.clientId) ?? "";
-      if (!clientId) continue;
-
-      const numberOfCakes = Math.max(1, Math.floor(Number(r.number_of_cakes ?? r.numberOfCakes ?? 1)));
-      const profitPercentage = Math.max(0, Math.min(1000, Number(r.profit_percentage ?? r.profitPercentage ?? 0)));
-
-      const ingredients = Array.isArray(r.ingredients)
-        ? r.ingredients.map((ing: RemoteIngredientRow, idx: number) => ({
-            id: String(ing.client_item_id ?? `${clientId}-ing-${idx}`),
-            name: String(ing.name ?? ""),
-            cost: Number(ing.cost ?? 0),
-            unit: ing.unit ?? undefined,
+    const remoteProfiles: CakeProfile[] = data.map((row) => {
+      const clientId = row.client_id || row.id || generateId(row.name ?? "Untitled Cake");
+      const ingredients = Array.isArray(row.profile_ingredients)
+        ? row.profile_ingredients.map((ing, idx) => ({
+            id: String(ing?.client_item_id ?? `${clientId}-ing-${idx}`),
+            name: String(ing?.name ?? ""),
+            cost: Number(ing?.cost ?? 0),
+            unit: ing?.unit ?? undefined,
           }))
         : [];
 
-      const additionalCosts = Array.isArray(r.additional_costs)
-        ? r.additional_costs.map((c: RemoteAdditionalCostRow, idx: number) => ({
-            id: String(c.client_item_id ?? `${clientId}-cost-${idx}`),
-            category: String(c.category ?? "other"),
-            description: c.description ?? undefined,
-            amount: Number(c.amount ?? 0),
-            allocationType: (c.allocation_type ?? c.allocationType ?? "per-cake") as "batch" | "per-cake",
+      const additionalCosts = Array.isArray(row.profile_additional_costs)
+        ? row.profile_additional_costs.map((c, idx) => ({
+            id: String(c?.client_item_id ?? `${clientId}-cost-${idx}`),
+            category: String(c?.category ?? "other"),
+            description: c?.description ?? undefined,
+            amount: Number(c?.amount ?? 0),
+            allocationType: (c?.allocation_type ?? "per-cake") as "batch" | "per-cake",
           }))
         : [];
 
       const inputs: PricingInputs = {
         ingredients,
         additionalCosts,
-        numberOfCakes,
-        profitPercentage,
+        numberOfCakes: Math.max(1, Math.floor(Number(row.number_of_cakes ?? 1))),
+        profitPercentage: Math.max(0, Math.min(1000, Number(row.profit_percentage ?? 0))),
       };
 
-      const existing = byId.get(clientId);
-      const remoteHasItems = (ingredients.length > 0) || (additionalCosts.length > 0);
-      const merged: CakeProfile = existing
-        ? (() => {
-            // If remote has no items, prefer existing (local) inputs to avoid wiping data
-            const chosenInputs = remoteHasItems ? inputs : existing.inputs;
-            return {
-              ...existing,
-              name: String(r.name ?? existing.name ?? "Untitled Cake"),
-              inputs: chosenInputs,
-              breakdown: calculateBreakdown(chosenInputs),
-              updatedAt: now,
-            };
-          })()
-        : {
-            id: clientId,
-            name: String(r.name ?? "Untitled Cake"),
-            inputs,
-            breakdown: calculateBreakdown(inputs),
-            createdAt: now,
-            updatedAt: now,
-          };
+      const createdAt = row.created_at ?? new Date().toISOString();
+      const updatedAt = row.updated_at ?? createdAt;
 
-      toUpsert.push(merged);
-    }
+      return {
+        id: clientId,
+        name: row.name ?? "Untitled Cake",
+        inputs,
+        breakdown: calculateBreakdown(inputs),
+        createdAt,
+        updatedAt,
+      };
+    });
 
-    // Merge into local: prefer the merged versions for ids we received, keep others
-    const receivedIds = new Set(toUpsert.map((p) => p.id));
-    const survivors = readAll().filter((p) => !receivedIds.has(p.id));
-    writeAll([...toUpsert, ...survivors].sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1)));
+    const local = readAll();
+    const receivedIds = new Set(remoteProfiles.map((p) => p.id));
+    const survivors = local.filter((p) => !receivedIds.has(p.id));
+    writeAll([...remoteProfiles, ...survivors].sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : -1)));
   } catch (e) {
     console.error("Unexpected error pulling profiles:", e);
   }
@@ -267,65 +214,73 @@ async function syncProfileToSupabase(profile: CakeProfile): Promise<void> {
   try {
     const supabase = getSupabaseClient();
     const { data: sessionResult } = await supabase.auth.getSession();
-    if (!sessionResult?.session) return; // only sync when authenticated
-    // Upsert via public RPC to avoid schema restrictions on the JS client
-    const cakesCount = Math.max(1, Math.floor(profile.inputs.numberOfCakes || 1));
-    const rawProfit = Math.max(0, Math.min(1000, profile.inputs.profitPercentage || 0));
-    
-    // WORKAROUND: Disambiguate overloaded RPC by ensuring decimal precision.
-    // Supabase has both integer and numeric overloads. Force numeric by adding
-    // a tiny decimal that gets rounded in display but disambiguates the call.
-    // TODO: Remove integer overload from database, then remove this workaround.
-    const profitForRpc = Number.isInteger(rawProfit) ? rawProfit + 0.001 : rawProfit;
+    const userId = sessionResult?.session?.user?.id;
+    if (!userId) return;
 
-    const { data: rpcId, error: rpcErr } = await supabase.rpc("upsert_profile", {
-      p_client_id: profile.id,
-      p_name: profile.name,
-      p_number_of_cakes: cakesCount,
-      p_profit_percentage: profitForRpc,
-    });
-    if (rpcErr || !rpcId) {
-      console.error("Failed to upsert profile:", rpcErr?.message ?? rpcErr, rpcErr);
+    const numberOfCakes = Math.max(1, Math.floor(profile.inputs.numberOfCakes || 1));
+    const profitPercentage = Math.max(0, Math.min(1000, profile.inputs.profitPercentage || 0));
+
+    const baseRow = {
+      user_id: userId,
+      client_id: profile.id,
+      name: profile.name,
+      number_of_cakes: numberOfCakes,
+      profit_percentage: profitPercentage,
+      updated_at: new Date().toISOString(),
+    };
+
+    const { data: upserted, error: upsertErr } = await supabase
+      .from("profiles")
+      .upsert(baseRow, { onConflict: "user_id,client_id" })
+      .select("id")
+      .single();
+
+    if (upsertErr || !upserted) {
+      console.error("Failed to upsert profile:", upsertErr?.message ?? upsertErr, upsertErr);
       return;
     }
 
-    const profileId = rpcId;
+    const profileId = upserted.id as string;
 
-    // Replace ingredient rows via RPC (best-effort, gracefully handle missing RPCs)
+    const { error: deleteIngredientsErr } = await supabase.from("profile_ingredients").delete().eq("profile_id", profileId);
+    if (deleteIngredientsErr) {
+      console.error("Failed to clear profile ingredients:", deleteIngredientsErr?.message ?? deleteIngredientsErr, deleteIngredientsErr);
+      return;
+    }
+
     const ingredientRows = (profile.inputs.ingredients || []).map((ing) => ({
+      profile_id: profileId,
+      client_item_id: ing.id ?? null,
       name: ing.name,
       cost: isFinite(ing.cost) ? ing.cost : 0,
       unit: ing.unit ?? null,
-      client_item_id: ing.id ?? null,
-    })) satisfies Record<string, unknown>[];
-    const ingredientPayload = {
-      p_profile_id: profileId,
-      p_items: ingredientRows,
-    } satisfies Record<string, unknown>;
-    const { error: ingErr } = await supabase.rpc("replace_profile_ingredients", ingredientPayload);
-    if (ingErr) {
-      // Only log non-"not found" errors - missing RPCs are expected in some setups
-      if (ingErr.message !== "not found") {
-        console.error("Failed to replace ingredients:", ingErr?.message ?? ingErr, ingErr);
+    }));
+    if (ingredientRows.length > 0) {
+      const { error: insertIngredientsErr } = await supabase.from("profile_ingredients").insert(ingredientRows);
+      if (insertIngredientsErr) {
+        console.error("Failed to insert profile ingredients:", insertIngredientsErr?.message ?? insertIngredientsErr, insertIngredientsErr);
+        return;
       }
     }
 
+    const { error: deleteCostsErr } = await supabase.from("profile_additional_costs").delete().eq("profile_id", profileId);
+    if (deleteCostsErr) {
+      console.error("Failed to clear profile additional costs:", deleteCostsErr?.message ?? deleteCostsErr, deleteCostsErr);
+      return;
+    }
+
     const costRows = (profile.inputs.additionalCosts || []).map((c) => ({
+      profile_id: profileId,
+      client_item_id: c.id ?? null,
       category: c.category,
       description: c.description ?? null,
       amount: isFinite(c.amount) ? c.amount : 0,
       allocation_type: c.allocationType,
-      client_item_id: c.id ?? null,
-    })) satisfies Record<string, unknown>[];
-    const costPayload = {
-      p_profile_id: profileId,
-      p_items: costRows,
-    } satisfies Record<string, unknown>;
-    const { error: costErr } = await supabase.rpc("replace_profile_additional_costs", costPayload);
-    if (costErr) {
-      // Only log non-"not found" errors - missing RPCs are expected in some setups
-      if (costErr.message !== "not found") {
-        console.error("Failed to replace additional costs:", costErr?.message ?? costErr, costErr);
+    }));
+    if (costRows.length > 0) {
+      const { error: insertCostsErr } = await supabase.from("profile_additional_costs").insert(costRows);
+      if (insertCostsErr) {
+        console.error("Failed to insert profile additional costs:", insertCostsErr?.message ?? insertCostsErr, insertCostsErr);
       }
     }
   } catch (e) {
@@ -352,13 +307,40 @@ async function deleteProfileFromSupabase(clientId: string): Promise<void> {
   try {
     const supabase = getSupabaseClient();
     const { data: sessionResult } = await supabase.auth.getSession();
-    if (!sessionResult?.session) return;
-    const { error } = await supabase.rpc("delete_profile_by_client_id", { p_client_id: clientId });
-    if (error) {
-      console.error("Failed to delete profile in Supabase:", error?.message ?? error, error);
+    const userId = sessionResult?.session?.user?.id;
+    if (!userId) return;
+
+    const { data: row, error: fetchErr } = await supabase
+      .from("profiles")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("client_id", clientId)
+      .single();
+    if (fetchErr || !row) {
+      if (fetchErr && fetchErr.code !== "PGRST116") {
+        console.error("Failed to locate profile before delete:", fetchErr?.message ?? fetchErr, fetchErr);
+      }
+      return;
+    }
+
+    const profileId = row.id as string;
+    const { error: deleteCostsErr } = await supabase.from("profile_additional_costs").delete().eq("profile_id", profileId);
+    if (deleteCostsErr) {
+      console.error("Failed to delete related additional costs:", deleteCostsErr?.message ?? deleteCostsErr, deleteCostsErr);
+      return;
+    }
+
+    const { error: deleteIngredientsErr } = await supabase.from("profile_ingredients").delete().eq("profile_id", profileId);
+    if (deleteIngredientsErr) {
+      console.error("Failed to delete related ingredients:", deleteIngredientsErr?.message ?? deleteIngredientsErr, deleteIngredientsErr);
+      return;
+    }
+
+    const { error: deleteProfileErr } = await supabase.from("profiles").delete().eq("id", profileId);
+    if (deleteProfileErr) {
+      console.error("Failed to delete profile:", deleteProfileErr?.message ?? deleteProfileErr, deleteProfileErr);
     }
   } catch (e) {
     console.error("Failed to delete profile in Supabase:", e);
   }
 }
-
