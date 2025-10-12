@@ -1,10 +1,13 @@
-export const USER_COOKIE_NAME = "cp_uid";
+import { getSupabaseClient } from "@/lib/supabaseClient";
 
-const VALID_PASSWORDS = new Set<string>(["ourcakeproject2025"]);
+export const USER_COOKIE_NAME = "cp_uid";
+const AUTH_COOKIE_VALUE = "authenticated";
+const VALID_COOKIE_VALUES = new Set<string>(["ourcakeproject2025", AUTH_COOKIE_VALUE]);
+const DEFAULT_COOKIE_MAX_AGE_SECONDS = 60 * 60 * 24 * 30; // 30 days
 
 export function isValidPassword(value: string | null | undefined): boolean {
   if (!value) return false;
-  return VALID_PASSWORDS.has(value);
+  return VALID_COOKIE_VALUES.has(value);
 }
 
 export function parseCookieString(cookieHeader: string | undefined): Record<string, string> {
@@ -36,18 +39,22 @@ export function readUserIdFromBrowser(): string | null {
   return readUserIdFromCookieHeader(document.cookie);
 }
 
+export function setUserCookieInBrowser(value: string, maxAgeSeconds: number = DEFAULT_COOKIE_MAX_AGE_SECONDS): void {
+  if (typeof document === "undefined") return;
+  const maxAge = Number.isFinite(maxAgeSeconds) && maxAgeSeconds > 0 ? Math.floor(maxAgeSeconds) : DEFAULT_COOKIE_MAX_AGE_SECONDS;
+  document.cookie = `${USER_COOKIE_NAME}=${encodeURIComponent(value)}; Max-Age=${maxAge}; Path=/; SameSite=Lax`;
+}
+
 export function clearUserCookieInBrowser(): void {
   if (typeof document === "undefined") return;
   document.cookie = `${USER_COOKIE_NAME}=; Max-Age=0; Path=/; SameSite=Lax`;
 }
 
-
-import { getSupabaseClient } from "@/lib/supabaseClient";
-
 export async function signUpWithEmail(email: string, password: string) {
   const supabase = getSupabaseClient();
   const { data, error } = await supabase.auth.signUp({ email, password });
   if (error) throw error;
+  setUserCookieInBrowser(AUTH_COOKIE_VALUE);
   return data;
 }
 
@@ -55,6 +62,7 @@ export async function signInWithEmail(email: string, password: string) {
   const supabase = getSupabaseClient();
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) throw error;
+  setUserCookieInBrowser(AUTH_COOKIE_VALUE);
   return data;
 }
 
@@ -62,6 +70,5 @@ export async function signOut() {
   const supabase = getSupabaseClient();
   const { error } = await supabase.auth.signOut();
   if (error) throw error;
+  clearUserCookieInBrowser();
 }
-
-
