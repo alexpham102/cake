@@ -4,7 +4,6 @@ import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
 declare global {
   // Persist client instance across HMR in dev to avoid multiple GoTrueClient warnings
-  // eslint-disable-next-line no-var
   var __supabaseClient: SupabaseClient | undefined;
 }
 
@@ -16,8 +15,11 @@ let clientSingleton: SupabaseClient;
 // Build the singleton at module load to avoid any race between concurrent callers
 if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
   const message = "Supabase env vars missing. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY";
-  // @ts-ignore
-  clientSingleton = new Proxy({}, { get() { throw new Error(message); } });
+  clientSingleton = new Proxy({}, {
+    get() {
+      throw new Error(message);
+    },
+  }) as SupabaseClient;
 } else if (typeof window !== "undefined") {
   if (!globalThis.__supabaseClient) {
     const created = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
@@ -51,5 +53,4 @@ if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
 export function getSupabaseClient(): SupabaseClient {
   return clientSingleton;
 }
-
 

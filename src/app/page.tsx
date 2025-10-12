@@ -1,7 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { useEffect } from "react";
+import { Suspense, useMemo, useState, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import IngredientForm from "@/components/IngredientForm";
 import IngredientList from "@/components/IngredientList";
@@ -12,13 +11,31 @@ import ProfitCalculator from "@/components/ProfitCalculator";
 import ResultsSummary from "@/components/ResultsSummary";
 import { AdditionalCostItem, Ingredient } from "@/types";
 import { calculateBreakdown } from "@/utils/calculations";
-import { saveCakeProfile, syncAllLocalCakeProfilesToSupabase, pullProfilesFromSupabaseToLocal } from "@/utils/profiles";
+import { saveCakeProfile, syncAllLocalCakeProfilesToSupabase, pullProfilesFromSupabaseToLocal, getCakeProfile } from "@/utils/profiles";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 // removed unused import
 
-export default function Home() {
+function generateId(prefix: string) {
+  return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function ensureUniqueIds<T extends { id?: string }>(items: T[], prefix: string): (T & { id: string })[] {
+  const seen = new Set<string>();
+  return items.map((item) => {
+    let id = item.id ?? "";
+    if (!id || seen.has(id)) {
+      do {
+        id = generateId(prefix);
+      } while (seen.has(id));
+    }
+    seen.add(id);
+    return { ...item, id } as T & { id: string };
+  });
+}
+
+function HomeContent() {
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [additionalCosts, setAdditionalCosts] = useState<AdditionalCostItem[]>([]);
   const [numberOfCakes, setNumberOfCakes] = useState<number>(1);
@@ -29,24 +46,6 @@ export default function Home() {
   const [isEditingName, setIsEditingName] = useState<boolean>(false);
   const [tempName, setTempName] = useState<string>("");
   const params = useSearchParams();
-
-  function generateId(prefix: string) {
-    return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  }
-
-  function ensureUniqueIds<T extends { id?: string }>(items: T[], prefix: string): (T & { id: string })[] {
-    const seen = new Set<string>();
-    return items.map((item) => {
-      let id = item.id ?? "";
-      if (!id || seen.has(id)) {
-        do {
-          id = generateId(prefix);
-        } while (seen.has(id));
-      }
-      seen.add(id);
-      return { ...item, id } as T & { id: string };
-    });
-  }
 
   // Ingredient handlers
   function addIngredient(ing: Omit<Ingredient, "id">) {
@@ -138,7 +137,6 @@ export default function Home() {
     const id = params?.get("id");
     if (!id) return;
     try {
-      const { getCakeProfile } = require("@/utils/profiles");
       const p = getCakeProfile(id);
       if (!p) return;
       setIngredients(ensureUniqueIds(p.inputs.ingredients || [], "ing"));
@@ -284,5 +282,13 @@ export default function Home() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function Home() {
+  return (
+    <Suspense fallback={<div className="p-6 text-sm text-gray-500">Loading…</div>}>
+      <HomeContent />
+    </Suspense>
   );
 }
