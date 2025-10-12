@@ -229,14 +229,19 @@ export async function pullProfilesFromSupabaseToLocal(): Promise<void> {
       };
 
       const existing = byId.get(clientId);
+      const remoteHasItems = (ingredients.length > 0) || (additionalCosts.length > 0);
       const merged: CakeProfile = existing
-        ? {
-            ...existing,
-            name: String(r.name ?? existing.name ?? "Untitled Cake"),
-            inputs,
-            breakdown: calculateBreakdown(inputs),
-            updatedAt: now,
-          }
+        ? (() => {
+            // If remote has no items, prefer existing (local) inputs to avoid wiping data
+            const chosenInputs = remoteHasItems ? inputs : existing.inputs;
+            return {
+              ...existing,
+              name: String(r.name ?? existing.name ?? "Untitled Cake"),
+              inputs: chosenInputs,
+              breakdown: calculateBreakdown(chosenInputs),
+              updatedAt: now,
+            };
+          })()
         : {
             id: clientId,
             name: String(r.name ?? "Untitled Cake"),

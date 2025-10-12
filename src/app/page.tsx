@@ -34,9 +34,31 @@ export default function Home() {
     return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
   }
 
+  function ensureUniqueIds<T extends { id?: string }>(items: T[], prefix: string): (T & { id: string })[] {
+    const seen = new Set<string>();
+    return items.map((item) => {
+      let id = item.id ?? "";
+      if (!id || seen.has(id)) {
+        do {
+          id = generateId(prefix);
+        } while (seen.has(id));
+      }
+      seen.add(id);
+      return { ...item, id } as T & { id: string };
+    });
+  }
+
   // Ingredient handlers
   function addIngredient(ing: Omit<Ingredient, "id">) {
-    setIngredients((prev) => [{ id: generateId("ing"), ...ing }, ...prev]);
+    setIngredients((prev) => {
+      const existingIds = new Set(prev.map((i) => i.id));
+      let id: string;
+      do {
+        id = generateId("ing");
+      } while (existingIds.has(id));
+      const nextIngredient: Ingredient = { id, ...ing };
+      return [nextIngredient, ...prev];
+    });
   }
   function editIngredient(updated: Ingredient) {
     setIngredients((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
@@ -47,7 +69,15 @@ export default function Home() {
 
   // Additional cost handlers
   function addAdditionalCost(item: Omit<AdditionalCostItem, "id">) {
-    setAdditionalCosts((prev) => [{ id: generateId("cost"), ...item }, ...prev]);
+    setAdditionalCosts((prev) => {
+      const existingIds = new Set(prev.map((i) => i.id));
+      let id: string;
+      do {
+        id = generateId("cost");
+      } while (existingIds.has(id));
+      const nextCost: AdditionalCostItem = { id, ...item };
+      return [nextCost, ...prev];
+    });
   }
   function editAdditionalCost(updated: AdditionalCostItem) {
     setAdditionalCosts((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
@@ -111,8 +141,8 @@ export default function Home() {
       const { getCakeProfile } = require("@/utils/profiles");
       const p = getCakeProfile(id);
       if (!p) return;
-      setIngredients(p.inputs.ingredients || []);
-      setAdditionalCosts(p.inputs.additionalCosts || []);
+      setIngredients(ensureUniqueIds(p.inputs.ingredients || [], "ing"));
+      setAdditionalCosts(ensureUniqueIds(p.inputs.additionalCosts || [], "cost"));
       setNumberOfCakes(p.inputs.numberOfCakes || 1);
       setProfitPercentage(p.inputs.profitPercentage || 0);
       setCakeName(p.name || "");
