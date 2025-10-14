@@ -1,6 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+/* Ensure Tailwind's `dark:` variant is controlled by the `.dark` class (not media) */
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
@@ -113,10 +114,23 @@
 }
 
 @layer base {
+  /* Set default border and outline colors using theme variables */
   * {
-    @apply border-border outline-ring/50;
+    border-color: var(--border);
+    /* Approximate Tailwind ring/50 for default outline color */
+    outline-color: color-mix(in oklab, var(--ring) 50%, transparent);
   }
+  /* Base document colors mapped to theme variables */
   body {
-    @apply bg-background text-foreground;
+    background-color: var(--background);
+    color: var(--foreground);
+  }
+  /* Ensure form fields render with white background in all themes */
+  input:not([type=checkbox]):not([type=radio]),
+  textarea,
+  select,
+  [data-slot="input"],
+  [data-slot="select-trigger"] {
+    background-color: #fff;
   }
 }

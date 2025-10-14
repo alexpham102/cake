@@ -60,7 +60,9 @@ export default function SavedCakesPage() {
       <div className="max-w-5xl mx-auto space-y-6">
         <header className="flex items-center justify-between">
           <h1 className="text-2xl sm:text-3xl font-bold">Saved Cakes</h1>
-          <Link href="/" className="border rounded px-4 py-2">Back to Calculator</Link>
+          <Button asChild variant="outline">
+            <Link href="/">Add New Cake</Link>
+          </Button>
         </header>
 
         {profiles.length === 0 ? (

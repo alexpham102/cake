@@ -11,6 +11,10 @@ export interface CakeProfile {
   breakdown: CostBreakdownPerCake;
   createdAt: string; // ISO string
   updatedAt: string; // ISO string
+  // Optional notes/instructions and image associated with the cake profile
+  instructions?: string;
+  preservationNotes?: string;
+  noteImageUrl?: string;
 }
 
 // Shape of rows returned from Supabase for profile queries
@@ -41,6 +45,9 @@ interface RemoteProfileRow {
   updated_at?: string | null;
   profile_ingredients?: RemoteIngredientRow[] | null;
   profile_additional_costs?: RemoteAdditionalCostRow[] | null;
+  instructions?: string | null;
+  preservation_notes?: string | null;
+  note_image_url?: string | null;
 }
 
 const STORAGE_KEY = "cake_pricing_profiles_v1";
@@ -165,6 +172,9 @@ export async function listCakeProfilesRemote(): Promise<CakeProfile[]> {
         profit_fixed_amount,
         created_at,
         updated_at,
+        instructions,
+        preservation_notes,
+        note_image_url,
         profile_ingredients (
           client_item_id,
           name,
@@ -228,6 +238,9 @@ export async function listCakeProfilesRemote(): Promise<CakeProfile[]> {
         breakdown: calculateBreakdown(inputs),
         createdAt,
         updatedAt,
+        instructions: row.instructions ?? undefined,
+        preservationNotes: row.preservation_notes ?? undefined,
+        noteImageUrl: row.note_image_url ?? undefined,
       };
     });
 
@@ -256,6 +269,9 @@ export async function getCakeProfileRemote(clientId: string): Promise<CakeProfil
         profit_fixed_amount,
         created_at,
         updated_at,
+        instructions,
+        preservation_notes,
+        note_image_url,
         profile_ingredients (
           client_item_id,
           name,
@@ -289,6 +305,9 @@ export async function saveCakeProfileRemote(params: {
   name: string;
   inputs: PricingInputs;
   includeBreakdownSnapshot?: boolean; // kept for parity; ignored remotely
+  instructions?: string;
+  preservationNotes?: string;
+  noteImageUrl?: string;
 }): Promise<CakeProfile> {
   const supabase = getSupabaseClient();
   const { data: sessionResult } = await supabase.auth.getSession();
@@ -329,6 +348,10 @@ export async function saveCakeProfileRemote(params: {
         profit_percentage: profitPercentage,
         profit_mode: params.inputs.profitMode ?? "percentage",
         profit_fixed_amount: Math.max(0, Number(params.inputs.profitFixedAmount || 0)),
+        // Store rich text (HTML). Empty strings are coerced to null to avoid noisy rows.
+        instructions: (params.instructions ?? "").trim() === "" ? null : params.instructions,
+        preservation_notes: (params.preservationNotes ?? "").trim() === "" ? null : params.preservationNotes,
+        note_image_url: params.noteImageUrl ?? null,
         updated_at: new Date().toISOString(),
       },
       { onConflict: "user_id,client_id" }
@@ -385,6 +408,9 @@ export async function saveCakeProfileRemote(params: {
     breakdown: calculateBreakdown(inputs),
     createdAt: upserted.created_at ?? new Date().toISOString(),
     updatedAt: upserted.updated_at ?? new Date().toISOString(),
+    instructions: params.instructions ?? undefined,
+    preservationNotes: params.preservationNotes ?? undefined,
+    noteImageUrl: params.noteImageUrl ?? undefined,
   };
 }
 
@@ -414,6 +440,9 @@ export async function pullProfilesFromSupabaseToLocal(): Promise<void> {
         profit_percentage,
         created_at,
         updated_at,
+        instructions,
+        preservation_notes,
+        note_image_url,
         profile_ingredients (
           client_item_id,
           name,
@@ -475,6 +504,9 @@ export async function pullProfilesFromSupabaseToLocal(): Promise<void> {
         breakdown: calculateBreakdown(inputs),
         createdAt,
         updatedAt,
+        instructions: (row as any).instructions ?? undefined,
+        preservationNotes: (row as any).preservation_notes ?? undefined,
+        noteImageUrl: (row as any).note_image_url ?? undefined,
       };
     });
 
@@ -505,6 +537,9 @@ async function syncProfileToSupabase(profile: CakeProfile): Promise<void> {
       profit_percentage: profitPercentage,
       profit_mode: profile.inputs.profitMode ?? "percentage",
       profit_fixed_amount: Math.max(0, Number(profile.inputs.profitFixedAmount || 0)),
+    instructions: profile.instructions ?? null,
+    preservation_notes: profile.preservationNotes ?? null,
+    note_image_url: profile.noteImageUrl ?? null,
       updated_at: new Date().toISOString(),
     };
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useMemo, useState, useEffect } from "react";
+import { Suspense, useMemo, useState, useEffect, useRef } from "react";
 import { useSearchParams } from "next/navigation";
 import IngredientForm from "@/components/IngredientForm";
 import IngredientList from "@/components/IngredientList";
@@ -9,6 +9,7 @@ import AdditionalCostList from "@/components/AdditionalCostList";
 import ProductionCalculator from "@/components/ProductionCalculator";
 import ProfitCalculator from "@/components/ProfitCalculator";
 import ResultsSummary from "@/components/ResultsSummary";
+import IngredientsCalculator from "@/components/IngredientsCalculator";
 import { AdditionalCostItem, Ingredient, ProfitMode } from "@/types";
 import { calculateBreakdown } from "@/utils/calculations";
 import { saveCakeProfileRemote, getCakeProfileRemote } from "@/utils/profiles";
@@ -17,6 +18,8 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 // removed unused import
 import { fetchCombinedPerBatchCost } from "@/utils/businessCosts";
+import { getSupabaseClient } from "@/lib/supabaseClient";
+import RichTextEditor from "@/components/RichTextEditor";
 
 function generateId(prefix: string) {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -50,6 +53,13 @@ function HomeContent() {
   const [tempName, setTempName] = useState<string>("");
   const params = useSearchParams();
   const [businessPerBatchCost, setBusinessPerBatchCost] = useState<number>(0);
+  const [instructions, setInstructions] = useState<string>("");
+  const [preservationNotes, setPreservationNotes] = useState<string>("");
+  const [noteImageFile, setNoteImageFile] = useState<File | null>(null);
+  const [noteImageUrl, setNoteImageUrl] = useState<string | undefined>(undefined);
+  const instructionsRef = useRef<HTMLTextAreaElement | null>(null);
+  const preservationRef = useRef<HTMLTextAreaElement | null>(null);
+  const [activeTab, setActiveTab] = useState<"calculator" | "ingredients" | "notes">("calculator");
 
   // Ingredient handlers
   function addIngredient(ing: Omit<Ingredient, "id">) {
@@ -62,6 +72,133 @@ function HomeContent() {
       const nextIngredient: Ingredient = { id, ...ing };
       return [nextIngredient, ...prev];
     });
+  }
+  async function uploadImageAndGetUrl(file: File): Promise<string | null> {
+    try {
+      const supabase = getSupabaseClient();
+      const { data: sessionResult } = await supabase.auth.getSession();
+      const userId = sessionResult?.session?.user?.id ?? "anon";
+      const ext = file.name.split(".").pop() || "jpg";
+      const folder = currentProfileId ? `${userId}/${currentProfileId}` : `${userId}/unsaved`;
+      const path = `${folder}/pasted-${Date.now()}.${ext}`;
+      const { error: uploadErr } = await supabase.storage
+        .from("cake-notes")
+        .upload(path, file, { upsert: true, contentType: file.type || "image/jpeg" });
+      if (uploadErr) throw uploadErr;
+      // Return a transformed, smaller, sharper URL (2x for retina, display at ~320px)
+      const { data: pub } = supabase.storage
+        .from("cake-notes")
+        .getPublicUrl(path, { transform: { width: 640, quality: 85, resize: "contain" } });
+      return pub.publicUrl;
+    } catch {
+      return null;
+    }
+  }
+
+  function insertIntoInstructionsAtCursor(text: string) {
+    setInstructions((prev) => {
+      const el = instructionsRef.current;
+      if (!el) return `${prev}${prev.endsWith("\n") ? "" : "\n"}${text}`;
+      const start = el.selectionStart ?? prev.length;
+      const end = el.selectionEnd ?? prev.length;
+      const next = prev.slice(0, start) + text + prev.slice(end);
+      // restore caret after React state update
+      setTimeout(() => {
+        const pos = start + text.length;
+        try {
+          el.setSelectionRange(pos, pos);
+          el.focus();
+        } catch {
+          // ignore
+        }
+      }, 0);
+      return next;
+    });
+  }
+
+  function insertIntoPreservationAtCursor(text: string) {
+    setPreservationNotes((prev) => {
+      const el = preservationRef.current;
+      if (!el) return `${prev}${prev.endsWith("\n") ? "" : "\n"}${text}`;
+      const start = el.selectionStart ?? prev.length;
+      const end = el.selectionEnd ?? prev.length;
+      const next = prev.slice(0, start) + text + prev.slice(end);
+      setTimeout(() => {
+        const pos = start + text.length;
+        try {
+          el.setSelectionRange(pos, pos);
+          el.focus();
+        } catch {
+          // ignore
+        }
+      }, 0);
+      return next;
+    });
+  }
+
+  async function handleInstructionsPaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const items = e.clipboardData?.items || [];
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      if (it.kind === "file" && it.type.startsWith("image/")) {
+        e.preventDefault();
+        const file = it.getAsFile();
+        if (!file) return;
+        const url = await uploadImageAndGetUrl(file);
+        if (url) insertIntoInstructionsAtCursor(`\n![image](${url})\n`);
+        return;
+      }
+    }
+    // Fallback for browsers that expose files but not items
+    const files = e.clipboardData?.files || [];
+    if (files.length > 0 && files[0].type.startsWith("image/")) {
+      e.preventDefault();
+      const url = await uploadImageAndGetUrl(files[0]);
+      if (url) insertIntoInstructionsAtCursor(`\n![image](${url})\n`);
+    }
+  }
+
+  async function handleInstructionsDrop(e: React.DragEvent<HTMLTextAreaElement>) {
+    e.preventDefault();
+    const file = e.dataTransfer?.files?.[0];
+    if (file && file.type.startsWith("image/")) {
+      const url = await uploadImageAndGetUrl(file);
+      if (url) insertIntoInstructionsAtCursor(`\n![image](${url})\n`);
+    }
+  }
+
+  function swallowDrag(e: React.DragEvent<HTMLTextAreaElement>) {
+    e.preventDefault();
+  }
+
+  async function handlePreservationPaste(e: React.ClipboardEvent<HTMLTextAreaElement>) {
+    const items = e.clipboardData?.items || [];
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      if (it.kind === "file" && it.type.startsWith("image/")) {
+        e.preventDefault();
+        const file = it.getAsFile();
+        if (!file) return;
+        const url = await uploadImageAndGetUrl(file);
+        if (url) insertIntoPreservationAtCursor(`\n![image](${url})\n`);
+        return;
+      }
+    }
+    const files = e.clipboardData?.files || [];
+    if (files.length > 0 && files[0].type.startsWith("image/")) {
+      e.preventDefault();
+      const url = await uploadImageAndGetUrl(files[0]);
+      if (url) insertIntoPreservationAtCursor(`\n![image](${url})\n`);
+    }
+  }
+
+  async function handlePreservationDrop(e: React.DragEvent<HTMLTextAreaElement>) {
+    e.preventDefault();
+    const file = e.dataTransfer?.files?.[0];
+    if (file && file.type.startsWith("image/")) {
+      const url = await uploadImageAndGetUrl(file);
+      if (url) insertIntoPreservationAtCursor(`\n![image](${url})\n`);
+    }
   }
   function editIngredient(updated: Ingredient) {
     setIngredients((prev) => prev.map((i) => (i.id === updated.id ? updated : i)));
@@ -114,12 +251,17 @@ function HomeContent() {
     setCurrentProfileId(null);
     setIsEditingName(false);
     setTempName("");
+    setInstructions("");
+    setPreservationNotes("");
+    setNoteImageFile(null);
+    setNoteImageUrl(undefined);
   }
 
   async function handleSave() {
     setSaveStatus("Saving…");
     const name = cakeName.trim() || "Untitled Cake";
-    const profile = await saveCakeProfileRemote({
+    // First upsert to ensure we have a stable client id
+    const initial = await saveCakeProfileRemote({
       id: currentProfileId || undefined,
       name,
       inputs: {
@@ -130,9 +272,50 @@ function HomeContent() {
         profitMode,
         profitFixedAmount,
       },
+      instructions,
+      preservationNotes,
+      noteImageUrl: noteImageUrl ?? undefined,
+    });
+
+    let uploadedUrl = noteImageUrl;
+    if (noteImageFile) {
+      try {
+        const supabase = getSupabaseClient();
+        const { data: sessionResult } = await supabase.auth.getSession();
+        const userId = sessionResult?.session?.user?.id ?? "anon";
+        const ext = noteImageFile.name.split(".").pop() || "jpg";
+        const path = `${userId}/${initial.id}/note-${Date.now()}.${ext}`;
+        const { error: uploadErr } = await supabase.storage
+          .from("cake-notes")
+          .upload(path, noteImageFile, { upsert: true, contentType: noteImageFile.type });
+        if (uploadErr) throw uploadErr;
+        const { data: pub } = supabase.storage.from("cake-notes").getPublicUrl(path);
+        // Use render transformation to constrain width and compress for clarity/speed
+        const base = pub.publicUrl;
+        uploadedUrl = `${base}?width=720&quality=80&resize=contain`;
+      } catch {
+        // ignore upload errors to not block saving core data
+      }
+    }
+
+    const profile = await saveCakeProfileRemote({
+      id: initial.id,
+      name: initial.name,
+      inputs: {
+        ingredients,
+        additionalCosts,
+        numberOfCakes,
+        profitPercentage,
+        profitMode,
+        profitFixedAmount,
+      },
+      instructions,
+      preservationNotes,
+      noteImageUrl: uploadedUrl ?? undefined,
     });
     setCakeName(profile.name);
     setCurrentProfileId(profile.id);
+    setNoteImageUrl(profile.noteImageUrl);
     setSaveStatus("Saved");
     window.setTimeout(() => setSaveStatus(null), 2000);
   }
@@ -157,6 +340,9 @@ function HomeContent() {
         setProfitFixedAmount(p.inputs.profitFixedAmount || 0);
         setCakeName(p.name || "");
         setCurrentProfileId(p.id);
+        setInstructions(p.instructions || "");
+        setPreservationNotes(p.preservationNotes || "");
+        setNoteImageUrl(p.noteImageUrl || undefined);
       } catch {
         // ignore
       }
@@ -200,6 +386,9 @@ function HomeContent() {
         profitMode,
         profitFixedAmount,
       },
+      instructions,
+      preservationNotes,
+      noteImageUrl: noteImageUrl ?? undefined,
     });
     setCurrentProfileId(profile.id);
     setSaveStatus("Saved");
@@ -253,66 +442,179 @@ function HomeContent() {
           </Card>
         </section>
 
-        <section className="space-y-3">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-xl">Ingredients</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <IngredientForm onAdd={addIngredient} />
-              <IngredientList ingredients={ingredients} onEdit={editIngredient} onDelete={deleteIngredient} />
-            </CardContent>
-          </Card>
-        </section>
-
-        <section className="space-y-3">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-xl">Additional Costs</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <AdditionalCostForm onAdd={addAdditionalCost} />
-              <AdditionalCostList items={additionalCosts} onEdit={editAdditionalCost} onDelete={deleteAdditionalCost} />
-              <div className="text-xs text-gray-600">
-                Business Costs per batch auto-applied: {businessPerBatchCost.toLocaleString('vi-VN')} đ
-              </div>
-            </CardContent>
-          </Card>
-        </section>
-
-        <section className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Production Quantity</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ProductionCalculator numberOfCakes={numberOfCakes} onChange={setNumberOfCakes} />
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-lg">Profit Margin</CardTitle>
-            </CardHeader>
-              <CardContent>
-                <ProfitCalculator
-                  profitMode={profitMode}
-                  profitPercentage={profitPercentage}
-                  profitFixedAmount={profitFixedAmount}
-                  onChangeMode={setProfitMode}
-                  onChangePercentage={setProfitPercentage}
-                  onChangeFixedAmount={setProfitFixedAmount}
-                />
-              </CardContent>
-          </Card>
-        </section>
-
         <section>
-          <Card>
-            <CardContent>
-              <ResultsSummary breakdown={breakdown} numberOfCakes={numberOfCakes} profitPercentage={profitPercentage} profitMode={profitMode} />
-            </CardContent>
-          </Card>
+          <div className="border-b">
+            <nav className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setActiveTab("calculator")}
+                className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                  activeTab === "calculator"
+                    ? "border-[#E04C11] text-[#E04C11]"
+                    : "border-transparent text-gray-600 hover:text-gray-900 hover:border-gray-300"
+                }`}
+                aria-selected={activeTab === "calculator"}
+              >
+                Cake Pricing Calculator
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab("ingredients")}
+                className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                  activeTab === "ingredients"
+                    ? "border-[#E04C11] text-[#E04C11]"
+                    : "border-transparent text-gray-600 hover:text-gray-900 hover:border-gray-300"
+                }`}
+                aria-selected={activeTab === "ingredients"}
+              >
+                Ingredients Calculator
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveTab("notes")}
+                className={`px-3 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
+                  activeTab === "notes"
+                    ? "border-[#E04C11] text-[#E04C11]"
+                    : "border-transparent text-gray-600 hover:text-gray-900 hover:border-gray-300"
+                }`}
+                aria-selected={activeTab === "notes"}
+              >
+                Notes, Instructions & Preservation
+              </button>
+            </nav>
+          </div>
         </section>
+
+        {activeTab === "calculator" && (
+          <>
+            <section className="space-y-3">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-xl">Ingredients</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <IngredientForm onAdd={addIngredient} />
+                  <IngredientList ingredients={ingredients} onEdit={editIngredient} onDelete={deleteIngredient} />
+                </CardContent>
+              </Card>
+            </section>
+
+            <section className="space-y-3">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-xl">Additional Costs</CardTitle>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  <AdditionalCostForm onAdd={addAdditionalCost} />
+                  <AdditionalCostList items={additionalCosts} onEdit={editAdditionalCost} onDelete={deleteAdditionalCost} />
+                  <div className="text-xs text-gray-600">
+                    Business Costs per batch auto-applied: {businessPerBatchCost.toLocaleString('vi-VN')} đ
+                  </div>
+                </CardContent>
+              </Card>
+            </section>
+
+            <section className="grid grid-cols-1 md:grid-cols-2 gap-6">
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Production Quantity</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ProductionCalculator numberOfCakes={numberOfCakes} onChange={setNumberOfCakes} />
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Profit Margin</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <ProfitCalculator
+                    profitMode={profitMode}
+                    profitPercentage={profitPercentage}
+                    profitFixedAmount={profitFixedAmount}
+                    onChangeMode={setProfitMode}
+                    onChangePercentage={setProfitPercentage}
+                    onChangeFixedAmount={setProfitFixedAmount}
+                  />
+                </CardContent>
+              </Card>
+            </section>
+
+            <section>
+              <Card>
+                <CardContent>
+                  <ResultsSummary breakdown={breakdown} numberOfCakes={numberOfCakes} profitPercentage={profitPercentage} profitMode={profitMode} />
+                </CardContent>
+              </Card>
+            </section>
+          </>
+        )}
+
+        {activeTab === "ingredients" && (
+          <section className="space-y-3">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-xl">Ingredients Calculator</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <IngredientsCalculator ingredients={ingredients} numberOfCakes={numberOfCakes} />
+              </CardContent>
+            </Card>
+          </section>
+        )}
+
+        {activeTab === "notes" && (
+          <section className="space-y-3">
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-xl">Notes</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Instructions</label>
+                  <RichTextEditor
+                    value={instructions}
+                    onChange={setInstructions}
+                    placeholder="Describe steps to make this cake"
+                    ariaLabel="Instructions editor"
+                    onUploadImage={uploadImageAndGetUrl}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Preservation Notes</label>
+                  <RichTextEditor
+                    value={preservationNotes}
+                    onChange={setPreservationNotes}
+                    placeholder="How to preserve this cake"
+                    ariaLabel="Preservation notes editor"
+                    onUploadImage={uploadImageAndGetUrl}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Note Image</label>
+                  {noteImageUrl ? (
+                    <div className="space-y-2">
+                      <img src={noteImageUrl} alt="Note image" className="max-h-48 rounded-md border" />
+                      <div className="flex gap-2">
+                        <Button variant="outline" onClick={() => setNoteImageUrl(undefined)}>Remove Image</Button>
+                      </div>
+                    </div>
+                  ) : null}
+                  <Input
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => setNoteImageFile(e.target.files?.[0] ?? null)}
+                  />
+                  <p className="text-xs text-gray-600">Image will upload on Save.</p>
+                </div>
+
+                <div className="flex justify-end">
+                  <Button onClick={handleSave}>{saveStatus === "Saved" ? "Saved" : "Save"}</Button>
+                </div>
+              </CardContent>
+            </Card>
+          </section>
+        )}
 
         <div className="flex justify-end">
           <Button variant="outline" onClick={resetAll}>Clear all</Button>
