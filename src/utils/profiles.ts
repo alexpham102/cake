@@ -13,6 +13,36 @@ export interface CakeProfile {
   updatedAt: string; // ISO string
 }
 
+// Shape of rows returned from Supabase for profile queries
+interface RemoteIngredientRow {
+  client_item_id?: string | null;
+  name?: string | null;
+  cost?: number | null;
+  unit?: string | null;
+}
+
+interface RemoteAdditionalCostRow {
+  client_item_id?: string | null;
+  category?: string | null;
+  description?: string | null;
+  amount?: number | null;
+  allocation_type?: "batch" | "per-cake" | null;
+}
+
+interface RemoteProfileRow {
+  id?: string | null;
+  client_id?: string | null;
+  name?: string | null;
+  number_of_cakes?: number | null;
+  profit_percentage?: number | null;
+  profit_mode?: string | null;
+  profit_fixed_amount?: number | null;
+  created_at?: string | null;
+  updated_at?: string | null;
+  profile_ingredients?: RemoteIngredientRow[] | null;
+  profile_additional_costs?: RemoteAdditionalCostRow[] | null;
+}
+
 const STORAGE_KEY = "cake_pricing_profiles_v1";
 
 function isBrowser(): boolean {
@@ -154,7 +184,7 @@ export async function listCakeProfilesRemote(): Promise<CakeProfile[]> {
 
     if (error || !Array.isArray(data)) return [];
 
-    const remoteProfiles: CakeProfile[] = data.map((row) => {
+    const remoteProfiles: CakeProfile[] = data.map((row: RemoteProfileRow) => {
       const clientId = row.client_id || row.id || generateId(row.name ?? "Untitled Cake");
       const ingredients = Array.isArray(row.profile_ingredients)
         ? row.profile_ingredients.map((ing, idx) => ({
@@ -175,8 +205,8 @@ export async function listCakeProfilesRemote(): Promise<CakeProfile[]> {
           }))
         : [];
 
-      const rawMode = String((row as any).profit_mode ?? "").toLowerCase();
-      const rawFixed = Math.max(0, Number((row as any).profit_fixed_amount ?? 0));
+      const rawMode = String(row.profit_mode ?? "").toLowerCase();
+      const rawFixed = Math.max(0, Number(row.profit_fixed_amount ?? 0));
       const resolvedMode = rawMode === "fixed" || (rawMode === "" && rawFixed > 0) ? "fixed" : "percentage";
 
       const inputs: PricingInputs = {
