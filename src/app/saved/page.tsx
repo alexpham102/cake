@@ -4,7 +4,8 @@ import Link from "next/link";
 import { listCakeProfilesRemote, deleteCakeProfileRemote } from "@/utils/profiles";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { formatMoney } from "@/utils/calculations";
+import { calculateBreakdown, formatMoney } from "@/utils/calculations";
+import { fetchCombinedPerBatchCost } from "@/utils/businessCosts";
 import { Button } from "@/components/ui/button";
 import { Trash2 } from "lucide-react";
 import type { CakeProfile } from "@/utils/profiles";
@@ -14,6 +15,7 @@ export default function SavedCakesPage() {
   const router = useRouter();
   const [profiles, setProfiles] = useState<CakeProfile[]>([]);
   const [authorized, setAuthorized] = useState<boolean | null>(null);
+  const [businessPerBatchCost, setBusinessPerBatchCost] = useState<number>(0);
 
   useEffect(() => {
     let cancelled = false;
@@ -33,6 +35,18 @@ export default function SavedCakesPage() {
       cancelled = true;
     };
   }, [router]);
+
+  // Load Business Costs per-batch so list pricing matches detail page calculations
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetchCombinedPerBatchCost();
+        setBusinessPerBatchCost(Math.max(0, Number(res?.combinedPerBatch || 0)));
+      } catch {
+        setBusinessPerBatchCost(0);
+      }
+    })();
+  }, []);
 
   if (authorized === false) return null;
 
@@ -67,7 +81,11 @@ export default function SavedCakesPage() {
                   <tr key={p.id} className="border-t">
                     <td className="p-2">{p.name}</td>
                     <td className="p-2">{new Date(p.updatedAt).toLocaleString()}</td>
-                    <td className="p-2 text-right">{formatMoney(p.breakdown.sellingPricePerCake)}</td>
+                    <td className="p-2 text-right">{
+                      formatMoney(
+                        calculateBreakdown(p.inputs, { extraPerBatchCost: businessPerBatchCost }).sellingPricePerCake
+                      )
+                    }</td>
                     <td className="p-2">
                       <div className="flex items-center justify-center gap-2">
                         <Button size="icon-sm" variant="outline" aria-label="Delete" onClick={() => handleDelete(p.id)}>
