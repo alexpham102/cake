@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 // removed unused import
+import { fetchCombinedPerBatchCost } from "@/utils/businessCosts";
 
 function generateId(prefix: string) {
   return `${prefix}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -48,6 +49,7 @@ function HomeContent() {
   const [isEditingName, setIsEditingName] = useState<boolean>(false);
   const [tempName, setTempName] = useState<string>("");
   const params = useSearchParams();
+  const [businessPerBatchCost, setBusinessPerBatchCost] = useState<number>(0);
 
   // Ingredient handlers
   function addIngredient(ing: Omit<Ingredient, "id">) {
@@ -89,15 +91,18 @@ function HomeContent() {
 
   const breakdown = useMemo(
     () =>
-      calculateBreakdown({
-        ingredients,
-        additionalCosts,
-        numberOfCakes,
-        profitPercentage,
-        profitMode,
-        profitFixedAmount,
-      }),
-    [ingredients, additionalCosts, numberOfCakes, profitPercentage, profitMode, profitFixedAmount]
+      calculateBreakdown(
+        {
+          ingredients,
+          additionalCosts,
+          numberOfCakes,
+          profitPercentage,
+          profitMode,
+          profitFixedAmount,
+        },
+        { extraPerBatchCost: businessPerBatchCost }
+      ),
+    [ingredients, additionalCosts, numberOfCakes, profitPercentage, profitMode, profitFixedAmount, businessPerBatchCost]
   );
 
   function resetAll() {
@@ -157,6 +162,18 @@ function HomeContent() {
       }
     })();
   }, [params]);
+
+  // Load Business Costs per-batch (equipment + overhead) for current user
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetchCombinedPerBatchCost();
+        setBusinessPerBatchCost(Math.max(0, Number(res?.combinedPerBatch || 0)));
+      } catch {
+        setBusinessPerBatchCost(0);
+      }
+    })();
+  }, []);
 
   function startEditName() {
     setTempName(cakeName);
@@ -256,6 +273,9 @@ function HomeContent() {
             <CardContent className="space-y-4">
               <AdditionalCostForm onAdd={addAdditionalCost} />
               <AdditionalCostList items={additionalCosts} onEdit={editAdditionalCost} onDelete={deleteAdditionalCost} />
+              <div className="text-xs text-gray-600">
+                Business Costs per batch auto-applied: {businessPerBatchCost.toLocaleString('vi-VN')} đ
+              </div>
             </CardContent>
           </Card>
         </section>

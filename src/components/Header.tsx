@@ -37,6 +37,9 @@ export default function Header() {
           <Button asChild variant="ghost">
             <Link href="/saved">Saved Cakes</Link>
           </Button>
+          <Button asChild variant="ghost">
+            <Link href="/business-costs">Business Costs</Link>
+          </Button>
           {mounted && (
             loggedIn ? (
               <Button variant="outline" onClick={handleLogout}>Logout</Button>
