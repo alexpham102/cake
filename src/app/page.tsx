@@ -9,9 +9,9 @@ import AdditionalCostList from "@/components/AdditionalCostList";
 import ProductionCalculator from "@/components/ProductionCalculator";
 import ProfitCalculator from "@/components/ProfitCalculator";
 import ResultsSummary from "@/components/ResultsSummary";
-import { AdditionalCostItem, Ingredient } from "@/types";
+import { AdditionalCostItem, Ingredient, ProfitMode } from "@/types";
 import { calculateBreakdown } from "@/utils/calculations";
-import { saveCakeProfile, syncAllLocalCakeProfilesToSupabase, pullProfilesFromSupabaseToLocal, getCakeProfile } from "@/utils/profiles";
+import { saveCakeProfileRemote, getCakeProfileRemote } from "@/utils/profiles";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -39,7 +39,9 @@ function HomeContent() {
   const [ingredients, setIngredients] = useState<Ingredient[]>([]);
   const [additionalCosts, setAdditionalCosts] = useState<AdditionalCostItem[]>([]);
   const [numberOfCakes, setNumberOfCakes] = useState<number>(1);
+  const [profitMode, setProfitMode] = useState<ProfitMode>("fixed");
   const [profitPercentage, setProfitPercentage] = useState<number>(0);
+  const [profitFixedAmount, setProfitFixedAmount] = useState<number>(0);
   const [cakeName, setCakeName] = useState<string>("");
   const [saveStatus, setSaveStatus] = useState<string | null>(null);
   const [currentProfileId, setCurrentProfileId] = useState<string | null>(null);
@@ -92,8 +94,10 @@ function HomeContent() {
         additionalCosts,
         numberOfCakes,
         profitPercentage,
+        profitMode,
+        profitFixedAmount,
       }),
-    [ingredients, additionalCosts, numberOfCakes, profitPercentage]
+    [ingredients, additionalCosts, numberOfCakes, profitPercentage, profitMode, profitFixedAmount]
   );
 
   function resetAll() {
@@ -107,9 +111,10 @@ function HomeContent() {
     setTempName("");
   }
 
-  function handleSave() {
+  async function handleSave() {
+    setSaveStatus("Saving…");
     const name = cakeName.trim() || "Untitled Cake";
-    const profile = saveCakeProfile({
+    const profile = await saveCakeProfileRemote({
       id: currentProfileId || undefined,
       name,
       inputs: {
@@ -117,6 +122,8 @@ function HomeContent() {
         additionalCosts,
         numberOfCakes,
         profitPercentage,
+        profitMode,
+        profitFixedAmount,
       },
     });
     setCakeName(profile.name);
@@ -125,29 +132,30 @@ function HomeContent() {
     window.setTimeout(() => setSaveStatus(null), 2000);
   }
 
-  useEffect(() => {
-    // Kick off initial background sync of any existing local profiles
-    void syncAllLocalCakeProfilesToSupabase();
-    // Also pull remote profiles to keep local fresh when switching browsers/devices
-    void pullProfilesFromSupabaseToLocal();
-  }, []);
+  // Removed local-storage sync and background pull
 
   // Load a profile from URL if id is provided
   useEffect(() => {
     const id = params?.get("id");
     if (!id) return;
-    try {
-      const p = getCakeProfile(id);
-      if (!p) return;
-      setIngredients(ensureUniqueIds(p.inputs.ingredients || [], "ing"));
-      setAdditionalCosts(ensureUniqueIds(p.inputs.additionalCosts || [], "cost"));
-      setNumberOfCakes(p.inputs.numberOfCakes || 1);
-      setProfitPercentage(p.inputs.profitPercentage || 0);
-      setCakeName(p.name || "");
-      setCurrentProfileId(p.id);
-    } catch {
-      // ignore
-    }
+    (async () => {
+      try {
+        const p = await getCakeProfileRemote(id);
+        if (!p) return;
+        setIngredients(ensureUniqueIds(p.inputs.ingredients || [], "ing"));
+        setAdditionalCosts(ensureUniqueIds(p.inputs.additionalCosts || [], "cost"));
+        setNumberOfCakes(p.inputs.numberOfCakes || 1);
+        setProfitPercentage(p.inputs.profitPercentage || 0);
+        // Fallback: if mode unavailable but fixed amount > 0, treat as fixed
+        const mode = p.inputs.profitMode ?? (p.inputs.profitFixedAmount && p.inputs.profitFixedAmount > 0 ? "fixed" : "percentage");
+        setProfitMode(mode);
+        setProfitFixedAmount(p.inputs.profitFixedAmount || 0);
+        setCakeName(p.name || "");
+        setCurrentProfileId(p.id);
+      } catch {
+        // ignore
+      }
+    })();
   }, [params]);
 
   function startEditName() {
@@ -160,11 +168,11 @@ function HomeContent() {
     setIsEditingName(false);
   }
 
-  function saveEditName() {
+  async function saveEditName() {
     const name = (tempName || "").trim();
     setCakeName(name);
     setIsEditingName(false);
-    const profile = saveCakeProfile({
+    const profile = await saveCakeProfileRemote({
       id: currentProfileId || undefined,
       name: name || "Untitled Cake",
       inputs: {
@@ -172,6 +180,8 @@ function HomeContent() {
         additionalCosts,
         numberOfCakes,
         profitPercentage,
+        profitMode,
+        profitFixedAmount,
       },
     });
     setCurrentProfileId(profile.id);
@@ -263,16 +273,23 @@ function HomeContent() {
             <CardHeader>
               <CardTitle className="text-lg">Profit Margin</CardTitle>
             </CardHeader>
-            <CardContent>
-              <ProfitCalculator profitPercentage={profitPercentage} onChange={setProfitPercentage} />
-            </CardContent>
+              <CardContent>
+                <ProfitCalculator
+                  profitMode={profitMode}
+                  profitPercentage={profitPercentage}
+                  profitFixedAmount={profitFixedAmount}
+                  onChangeMode={setProfitMode}
+                  onChangePercentage={setProfitPercentage}
+                  onChangeFixedAmount={setProfitFixedAmount}
+                />
+              </CardContent>
           </Card>
         </section>
 
         <section>
           <Card>
             <CardContent>
-              <ResultsSummary breakdown={breakdown} numberOfCakes={numberOfCakes} profitPercentage={profitPercentage} />
+              <ResultsSummary breakdown={breakdown} numberOfCakes={numberOfCakes} profitPercentage={profitPercentage} profitMode={profitMode} />
             </CardContent>
           </Card>
         </section>

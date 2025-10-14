@@ -18,6 +18,8 @@ export function clampNumber(value: number, min: number, max: number = Number.POS
 export function calculateBreakdown(inputs: PricingInputs): CostBreakdownPerCake {
   const numberOfCakes = Math.max(1, Math.floor(inputs.numberOfCakes || 1));
   const profitPercentage = clampNumber(inputs.profitPercentage || 0, 0, 1000);
+  const profitMode = inputs.profitMode ?? "percentage";
+  const profitFixedAmount = clampNumber(inputs.profitFixedAmount || 0, 0);
 
   const totalIngredientCost = sumIngredients(inputs.ingredients);
   const totalPerBatchAdditionalCosts = sumAdditionalCosts(inputs.additionalCosts, "batch");
@@ -28,7 +30,10 @@ export function calculateBreakdown(inputs: PricingInputs): CostBreakdownPerCake 
   const perCakeAdditionalCosts = allocatedBatchCostsPerCake + totalPerCakeAdditionalCosts;
   const totalCostPerCake = ingredientCostPerCake + perCakeAdditionalCosts;
 
-  const profitPerCake = totalCostPerCake * (profitPercentage / 100);
+  const profitPerCake =
+    profitMode === "fixed"
+      ? profitFixedAmount
+      : totalCostPerCake * (profitPercentage / 100);
   const sellingPricePerCake = totalCostPerCake + profitPerCake;
 
   return {

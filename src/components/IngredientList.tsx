@@ -70,7 +70,17 @@ export default function IngredientList({ ingredients, onEdit, onDelete }: Ingred
               </TableCell>
               <TableCell className="text-right">
                 {editingId === ing.id ? (
-                  <Input className="h-8 text-right" value={editCost} onChange={(e) => setEditCost(e.target.value)} type="number" min={0} step="0.01" />
+                  <Input
+                    className="h-8 text-right"
+                    value={editCost ? Number(editCost).toLocaleString('vi-VN') : ""}
+                    onChange={(e) => {
+                      const raw = e.target.value || "";
+                      const digitsOnly = raw.replace(/\D/g, "");
+                      setEditCost(digitsOnly);
+                    }}
+                    type="text"
+                    inputMode="numeric"
+                  />
                 ) : (
                   formatMoney(ing.cost)
                 )}

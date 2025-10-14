@@ -75,7 +75,17 @@ export default function AdditionalCostList({ items, onEdit, onDelete }: Addition
               </TableCell>
               <TableCell className="text-right">
                 {editingId === item.id ? (
-                  <Input className="h-8 text-right" value={editAmount} onChange={(e) => setEditAmount(e.target.value)} type="number" min={0} step="0.01" />
+                  <Input
+                    className="h-8 text-right"
+                    value={editAmount ? Number(editAmount).toLocaleString('vi-VN') : ""}
+                    onChange={(e) => {
+                      const raw = e.target.value || "";
+                      const digitsOnly = raw.replace(/\D/g, "");
+                      setEditAmount(digitsOnly);
+                    }}
+                    type="text"
+                    inputMode="numeric"
+                  />
                 ) : (
                   formatMoney(item.amount)
                 )}

@@ -115,6 +115,253 @@ export function saveCakeProfile(params: {
   return newProfile;
 }
 
+// Supabase-only async APIs (no local storage)
+export async function listCakeProfilesRemote(): Promise<CakeProfile[]> {
+  try {
+    const supabase = getSupabaseClient();
+    const { data: sessionResult } = await supabase.auth.getSession();
+    const userId = sessionResult?.session?.user?.id;
+    if (!userId) return [];
+
+    const { data, error } = await supabase
+      .from("profiles")
+      .select(`
+        id,
+        client_id,
+        name,
+        number_of_cakes,
+        profit_percentage,
+        profit_mode,
+        profit_fixed_amount,
+        created_at,
+        updated_at,
+        profile_ingredients (
+          client_item_id,
+          name,
+          cost,
+          unit
+        ),
+        profile_additional_costs (
+          client_item_id,
+          category,
+          description,
+          amount,
+          allocation_type
+        )
+      `)
+      .eq("user_id", userId)
+      .order("updated_at", { ascending: false });
+
+    if (error || !Array.isArray(data)) return [];
+
+    const remoteProfiles: CakeProfile[] = data.map((row) => {
+      const clientId = row.client_id || row.id || generateId(row.name ?? "Untitled Cake");
+      const ingredients = Array.isArray(row.profile_ingredients)
+        ? row.profile_ingredients.map((ing, idx) => ({
+            id: String(ing?.client_item_id ?? `${clientId}-ing-${idx}`),
+            name: String(ing?.name ?? ""),
+            cost: Number(ing?.cost ?? 0),
+            unit: ing?.unit ?? undefined,
+          }))
+        : [];
+
+      const additionalCosts = Array.isArray(row.profile_additional_costs)
+        ? row.profile_additional_costs.map((c, idx) => ({
+            id: String(c?.client_item_id ?? `${clientId}-cost-${idx}`),
+            category: String(c?.category ?? "other"),
+            description: c?.description ?? undefined,
+            amount: Number(c?.amount ?? 0),
+            allocationType: (c?.allocation_type ?? "per-cake") as "batch" | "per-cake",
+          }))
+        : [];
+
+      const rawMode = String((row as any).profit_mode ?? "").toLowerCase();
+      const rawFixed = Math.max(0, Number((row as any).profit_fixed_amount ?? 0));
+      const resolvedMode = rawMode === "fixed" || (rawMode === "" && rawFixed > 0) ? "fixed" : "percentage";
+
+      const inputs: PricingInputs = {
+        ingredients,
+        additionalCosts,
+        numberOfCakes: Math.max(1, Math.floor(Number(row.number_of_cakes ?? 1))),
+        profitPercentage: Math.max(0, Math.min(1000, Number(row.profit_percentage ?? 0))),
+        profitMode: resolvedMode,
+        profitFixedAmount: rawFixed,
+      };
+
+      const createdAt = row.created_at ?? new Date().toISOString();
+      const updatedAt = row.updated_at ?? createdAt;
+
+      return {
+        id: clientId,
+        name: row.name ?? "Untitled Cake",
+        inputs,
+        breakdown: calculateBreakdown(inputs),
+        createdAt,
+        updatedAt,
+      };
+    });
+
+    return remoteProfiles;
+  } catch {
+    return [];
+  }
+}
+
+export async function getCakeProfileRemote(clientId: string): Promise<CakeProfile | null> {
+  try {
+    const supabase = getSupabaseClient();
+    const { data: sessionResult } = await supabase.auth.getSession();
+    const userId = sessionResult?.session?.user?.id;
+    if (!userId) return null;
+
+    const { data, error } = await supabase
+      .from("profiles")
+      .select(`
+        id,
+        client_id,
+        name,
+        number_of_cakes,
+        profit_percentage,
+        profit_mode,
+        profit_fixed_amount,
+        created_at,
+        updated_at,
+        profile_ingredients (
+          client_item_id,
+          name,
+          cost,
+          unit
+        ),
+        profile_additional_costs (
+          client_item_id,
+          category,
+          description,
+          amount,
+          allocation_type
+        )
+      `)
+      .eq("user_id", userId)
+      .eq("client_id", clientId)
+      .maybeSingle();
+
+    if (error || !data) return null;
+
+    // Map to CakeProfile using the same logic as list
+    const list = await listCakeProfilesRemote();
+    return list.find((p) => p.id === (data.client_id || data.id)) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+export async function saveCakeProfileRemote(params: {
+  id?: string;
+  name: string;
+  inputs: PricingInputs;
+  includeBreakdownSnapshot?: boolean; // kept for parity; ignored remotely
+}): Promise<CakeProfile> {
+  const supabase = getSupabaseClient();
+  const { data: sessionResult } = await supabase.auth.getSession();
+  const userId = sessionResult?.session?.user?.id;
+  if (!userId) throw new Error("Not authenticated");
+
+  const clientId = params.id || generateId(params.name);
+  const numberOfCakes = Math.max(1, Math.floor(params.inputs.numberOfCakes || 1));
+  // Remote schema stores only percentage. If fixed mode is selected, derive an equivalent percentage
+  // based on current total cost if possible; otherwise fall back to provided percentage.
+  let profitPercentage = Math.max(0, Math.min(1000, params.inputs.profitPercentage || 0));
+  if ((params.inputs.profitMode ?? "percentage") === "fixed") {
+    try {
+      const breakdown = calculateBreakdown({
+        ingredients: params.inputs.ingredients || [],
+        additionalCosts: params.inputs.additionalCosts || [],
+        numberOfCakes: numberOfCakes,
+        profitPercentage: profitPercentage,
+        profitMode: "fixed",
+        profitFixedAmount: Math.max(0, Number(params.inputs.profitFixedAmount || 0)),
+      });
+      const totalCost = breakdown.totalCostPerCake;
+      const fixed = Math.max(0, Number(params.inputs.profitFixedAmount || 0));
+      profitPercentage = totalCost > 0 ? Math.min(1000, (fixed / totalCost) * 100) : 0;
+    } catch {
+      // ignore and keep computed percentage
+    }
+  }
+
+  const { data: upserted, error: upsertErr } = await supabase
+    .from("profiles")
+    .upsert(
+      {
+        user_id: userId,
+        client_id: clientId,
+        name: params.name,
+        number_of_cakes: numberOfCakes,
+        profit_percentage: profitPercentage,
+        profit_mode: params.inputs.profitMode ?? "percentage",
+        profit_fixed_amount: Math.max(0, Number(params.inputs.profitFixedAmount || 0)),
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "user_id,client_id" }
+    )
+    .select("id, created_at, updated_at")
+    .single();
+
+  if (upsertErr || !upserted) throw upsertErr || new Error("Failed to upsert profile");
+  const profileId = upserted.id as string;
+
+  // Replace children
+  const { error: delIngErr } = await supabase.from("profile_ingredients").delete().eq("profile_id", profileId);
+  if (delIngErr) throw delIngErr;
+  const ingredientRows = (params.inputs.ingredients || []).map((ing) => ({
+    profile_id: profileId,
+    client_item_id: ing.id ?? null,
+    name: ing.name,
+    cost: isFinite(ing.cost) ? ing.cost : 0,
+    unit: ing.unit ?? null,
+  }));
+  if (ingredientRows.length) {
+    const { error } = await supabase.from("profile_ingredients").insert(ingredientRows);
+    if (error) throw error;
+  }
+
+  const { error: delCostErr } = await supabase.from("profile_additional_costs").delete().eq("profile_id", profileId);
+  if (delCostErr) throw delCostErr;
+  const costRows = (params.inputs.additionalCosts || []).map((c) => ({
+    profile_id: profileId,
+    client_item_id: c.id ?? null,
+    category: c.category,
+    description: c.description ?? null,
+    amount: isFinite(c.amount) ? c.amount : 0,
+    allocation_type: c.allocationType,
+  }));
+  if (costRows.length) {
+    const { error } = await supabase.from("profile_additional_costs").insert(costRows);
+    if (error) throw error;
+  }
+
+  const inputs: PricingInputs = {
+    ingredients: params.inputs.ingredients || [],
+    additionalCosts: params.inputs.additionalCosts || [],
+    numberOfCakes,
+    profitPercentage,
+    profitMode: params.inputs.profitMode ?? "percentage",
+    profitFixedAmount: Math.max(0, Number(params.inputs.profitFixedAmount || 0)),
+  };
+
+  return {
+    id: clientId,
+    name: params.name,
+    inputs,
+    breakdown: calculateBreakdown(inputs),
+    createdAt: upserted.created_at ?? new Date().toISOString(),
+    updatedAt: upserted.updated_at ?? new Date().toISOString(),
+  };
+}
+
+export async function deleteCakeProfileRemote(clientId: string): Promise<void> {
+  await deleteProfileFromSupabase(clientId);
+}
+
 /**
  * Pull profiles from Supabase and merge them into local storage so saved cakes
  * appear across browsers/devices. This is best-effort and will no-op if not authenticated
@@ -226,6 +473,8 @@ async function syncProfileToSupabase(profile: CakeProfile): Promise<void> {
       name: profile.name,
       number_of_cakes: numberOfCakes,
       profit_percentage: profitPercentage,
+      profit_mode: profile.inputs.profitMode ?? "percentage",
+      profit_fixed_amount: Math.max(0, Number(profile.inputs.profitFixedAmount || 0)),
       updated_at: new Date().toISOString(),
     };
 

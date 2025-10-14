@@ -71,11 +71,14 @@ export default function AdditionalCostForm({ onAdd }: AdditionalCostFormProps) {
         <Input
           aria-label="Amount"
           placeholder="Amount"
-          value={amount}
-          onChange={(e) => setAmount(e.target.value)}
-          type="number"
-          min={0}
-          step="0.01"
+          value={amount ? Number(amount).toLocaleString('vi-VN') : ""}
+          onChange={(e) => {
+            const raw = e.target.value || "";
+            const digitsOnly = raw.replace(/\D/g, "");
+            setAmount(digitsOnly);
+          }}
+          type="text"
+          inputMode="numeric"
           required
         />
         <Select value={allocationType} onValueChange={(v) => setAllocationType(v as AllocationType)}>

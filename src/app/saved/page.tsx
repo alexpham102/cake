@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { listCakeProfiles, deleteCakeProfile, pullProfilesFromSupabaseToLocal } from "@/utils/profiles";
+import { listCakeProfilesRemote, deleteCakeProfileRemote } from "@/utils/profiles";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { formatMoney } from "@/utils/calculations";
@@ -18,7 +18,6 @@ export default function SavedCakesPage() {
   useEffect(() => {
     let cancelled = false;
     async function init() {
-      // Client-side guard to avoid any UI flash before middleware redirect
       const ok = isValidPassword(readUserIdFromBrowser());
       if (!ok) {
         setAuthorized(false);
@@ -26,9 +25,8 @@ export default function SavedCakesPage() {
         return;
       }
       setAuthorized(true);
-      // Pull remote profiles so saved cakes appear across browsers
-      await pullProfilesFromSupabaseToLocal();
-      if (!cancelled) setProfiles(listCakeProfiles());
+      const rows = await listCakeProfilesRemote();
+      if (!cancelled) setProfiles(rows);
     }
     void init();
     return () => {
@@ -38,9 +36,9 @@ export default function SavedCakesPage() {
 
   if (authorized === false) return null;
 
-  function handleDelete(id: string) {
-    deleteCakeProfile(id);
-    setProfiles(listCakeProfiles());
+  async function handleDelete(id: string) {
+    await deleteCakeProfileRemote(id);
+    setProfiles(await listCakeProfilesRemote());
   }
 
   return (

@@ -1,5 +1,7 @@
 export type AllocationType = "batch" | "per-cake";
 
+export type ProfitMode = "percentage" | "fixed";
+
 export interface Ingredient {
   id: string;
   name: string;
@@ -20,6 +22,9 @@ export interface PricingInputs {
   additionalCosts: AdditionalCostItem[];
   numberOfCakes: number; // must be >= 1
   profitPercentage: number; // must be >= 0
+  // When set to "fixed", use profitFixedAmount per cake instead of percentage
+  profitMode?: ProfitMode; // default: "fixed" for new sessions; "percentage" for loaded legacy profiles
+  profitFixedAmount?: number; // must be >= 0
 }
 
 export interface CostBreakdownPerCake {

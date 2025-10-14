@@ -52,11 +52,14 @@ export default function IngredientForm({ onAdd }: IngredientFormProps) {
         <Input
           aria-label="Cost"
           placeholder="Cost"
-          value={cost}
-          onChange={(e) => setCost(e.target.value)}
-          type="number"
-          min={0}
-          step="0.01"
+          value={cost ? Number(cost).toLocaleString('vi-VN') : ""}
+          onChange={(e) => {
+            const raw = e.target.value || "";
+            const digitsOnly = raw.replace(/\D/g, "");
+            setCost(digitsOnly);
+          }}
+          type="text"
+          inputMode="numeric"
           required
         />
         <Button type="submit">Add Ingredient</Button>
