@@ -466,7 +466,7 @@ export async function pullProfilesFromSupabaseToLocal(): Promise<void> {
     }
     if (!Array.isArray(data)) return;
 
-    const remoteProfiles: CakeProfile[] = data.map((row) => {
+    const remoteProfiles: CakeProfile[] = data.map((row: RemoteProfileRow) => {
       const clientId = row.client_id || row.id || generateId(row.name ?? "Untitled Cake");
       const ingredients = Array.isArray(row.profile_ingredients)
         ? row.profile_ingredients.map((ing, idx) => ({
@@ -504,9 +504,9 @@ export async function pullProfilesFromSupabaseToLocal(): Promise<void> {
         breakdown: calculateBreakdown(inputs),
         createdAt,
         updatedAt,
-        instructions: (row as any).instructions ?? undefined,
-        preservationNotes: (row as any).preservation_notes ?? undefined,
-        noteImageUrl: (row as any).note_image_url ?? undefined,
+        instructions: row.instructions ?? undefined,
+        preservationNotes: row.preservation_notes ?? undefined,
+        noteImageUrl: row.note_image_url ?? undefined,
       };
     });
 

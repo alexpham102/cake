@@ -126,7 +126,7 @@ export default function IngredientsCalculator({ ingredients, numberOfCakes }: In
         ) : null}
       </div>
       <p className="text-xs text-gray-600">
-        Per-cake quantities are derived by dividing each ingredient's batch unit by the current batch size.
+        Per-cake quantities are derived by dividing each ingredient&apos;s batch unit by the current batch size.
         Enter your desired number of cakes to scale the amounts.
       </p>
     </div>

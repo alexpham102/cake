@@ -59,7 +59,7 @@ export default function RichTextEditor({ value, onChange, placeholder, ariaLabel
         sel?.addRange(range);
       }
     } else {
-      (el as any).innerHTML += html; // fallback
+      el.innerHTML += html; // fallback
     }
     onChange(editorRef.current?.innerHTML || "");
   }
