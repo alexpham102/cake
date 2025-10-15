@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { listCakeProfilesRemote, deleteCakeProfileRemote } from "@/utils/profiles";
+import { listCakeProfilesRemote, deleteCakeProfileRemote, duplicateCakeProfileRemote } from "@/utils/profiles";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { calculateBreakdown, formatMoney } from "@/utils/calculations";
@@ -55,6 +55,15 @@ export default function SavedCakesPage() {
     setProfiles(await listCakeProfilesRemote());
   }
 
+  async function handleDuplicate(id: string) {
+    try {
+      await duplicateCakeProfileRemote(id);
+      setProfiles(await listCakeProfilesRemote());
+    } catch {
+      // ignore transient errors; UI will remain unchanged
+    }
+  }
+
   return (
     <div className="min-h-screen p-6 sm:p-10">
       <div className="max-w-5xl mx-auto space-y-6">
@@ -90,6 +99,7 @@ export default function SavedCakesPage() {
                     }</td>
                     <td className="p-2">
                       <div className="flex items-center justify-center gap-2">
+                        <Button size="sm" variant="outline" onClick={() => handleDuplicate(p.id)}>Duplicate</Button>
                         <Button size="icon-sm" variant="outline" aria-label="Delete" onClick={() => handleDelete(p.id)}>
                           <Trash2 />
                         </Button>

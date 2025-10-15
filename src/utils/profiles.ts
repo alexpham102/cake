@@ -419,6 +419,36 @@ export async function deleteCakeProfileRemote(clientId: string): Promise<void> {
 }
 
 /**
+ * Create a new cake profile by duplicating an existing one identified by its client id.
+ * The duplicate will have a new client id and a name with "(copy)" suffix.
+ */
+export async function duplicateCakeProfileRemote(sourceClientId: string): Promise<CakeProfile> {
+  const supabase = getSupabaseClient();
+  const { data: sessionResult } = await supabase.auth.getSession();
+  const userId = sessionResult?.session?.user?.id;
+  if (!userId) throw new Error("Not authenticated");
+
+  // Load full profile via existing listing mapper to keep logic consistent
+  const source = await getCakeProfileRemote(sourceClientId);
+  if (!source) throw new Error("Source profile not found");
+
+  const copyName = `${source.name} (copy)`;
+  const newId = generateId(copyName);
+
+  // Persist duplicate using existing save routine to handle children rows, notes, etc.
+  const duplicated = await saveCakeProfileRemote({
+    id: newId,
+    name: copyName,
+    inputs: source.inputs,
+    instructions: source.instructions,
+    preservationNotes: source.preservationNotes,
+    noteImageUrl: source.noteImageUrl,
+  });
+
+  return duplicated;
+}
+
+/**
  * Pull profiles from Supabase and merge them into local storage so saved cakes
  * appear across browsers/devices. This is best-effort and will no-op if not authenticated
  * or if the RPCs are unavailable server-side.
