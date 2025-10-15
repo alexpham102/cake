@@ -1,6 +1,7 @@
 "use client";
 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Input } from "@/components/ui/input";
 
 type ProfitMode = "percentage" | "fixed";
 
@@ -37,8 +38,8 @@ export default function ProfitCalculator({
 
         {profitMode === "percentage" ? (
           <div className="flex items-center gap-2 w-full">
-            <input
-              className="border rounded px-3 py-2 w-full"
+            <Input
+              className="border rounded-md px-3 py-2 w-full"
               type="number"
               min={0}
               max={1000}
@@ -54,8 +55,8 @@ export default function ProfitCalculator({
           </div>
         ) : (
           <div className="flex items-center gap-2 w-full">
-            <input
-              className="border rounded px-3 py-2 w-full"
+            <Input
+              className="border rounded-md px-3 py-2 w-full"
               type="text"
               inputMode="numeric"
               placeholder="0"

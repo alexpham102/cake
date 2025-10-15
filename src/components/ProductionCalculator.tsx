@@ -1,5 +1,7 @@
 "use client";
 
+import { Input } from "@/components/ui/input";
+
 interface ProductionCalculatorProps {
   numberOfCakes: number;
   onChange: (value: number) => void;
@@ -9,8 +11,8 @@ export default function ProductionCalculator({ numberOfCakes, onChange }: Produc
   return (
     <div className="space-y-2">
       <label className="block text-sm font-medium">Number of cakes produced</label>
-      <input
-        className="border rounded px-3 py-2 w-full"
+      <Input
+        className="border rounded-md px-3 py-2 w-full"
         type="number"
         min={1}
         step={1}

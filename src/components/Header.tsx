@@ -40,6 +40,9 @@ export default function Header() {
           <Button asChild variant="ghost">
             <Link href="/business-costs">Business Costs</Link>
           </Button>
+          <Button asChild variant="ghost">
+            <Link href="/ingredients-costs">Ingredients Costs</Link>
+          </Button>
           {mounted && (
             loggedIn ? (
               <Button variant="outline" onClick={handleLogout}>Logout</Button>
