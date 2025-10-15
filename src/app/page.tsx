@@ -60,6 +60,9 @@ function HomeContent() {
   const instructionsRef = useRef<HTMLTextAreaElement | null>(null);
   const preservationRef = useRef<HTMLTextAreaElement | null>(null);
   const [activeTab, setActiveTab] = useState<"calculator" | "ingredients" | "notes">("calculator");
+  const lastSavedSignatureRef = useRef<string | null>(null);
+  const autosaveTimerRef = useRef<number | null>(null);
+  const isReadyToAutosaveRef = useRef<boolean>(false);
 
   // Ingredient handlers
   function addIngredient(ing: Omit<Ingredient, "id">) {
@@ -258,66 +261,74 @@ function HomeContent() {
   }
 
   async function handleSave() {
-    setSaveStatus("Saving…");
-    const name = cakeName.trim() || "Untitled Cake";
-    // First upsert to ensure we have a stable client id
-    const initial = await saveCakeProfileRemote({
-      id: currentProfileId || undefined,
-      name,
-      inputs: {
+    try {
+      setSaveStatus("Saving…");
+      const name = cakeName.trim() || "Untitled Cake";
+      const baseInputs = {
         ingredients,
         additionalCosts,
         numberOfCakes,
         profitPercentage,
         profitMode,
         profitFixedAmount,
-      },
-      instructions,
-      preservationNotes,
-      noteImageUrl: noteImageUrl ?? undefined,
-    });
+      };
+      // First upsert to ensure we have a stable client id
+      const initial = await saveCakeProfileRemote({
+        id: currentProfileId || undefined,
+        name,
+        inputs: baseInputs,
+        instructions,
+        preservationNotes,
+        noteImageUrl: noteImageUrl ?? undefined,
+      });
 
-    let uploadedUrl = noteImageUrl;
-    if (noteImageFile) {
-      try {
-        const supabase = getSupabaseClient();
-        const { data: sessionResult } = await supabase.auth.getSession();
-        const userId = sessionResult?.session?.user?.id ?? "anon";
-        const ext = noteImageFile.name.split(".").pop() || "jpg";
-        const path = `${userId}/${initial.id}/note-${Date.now()}.${ext}`;
-        const { error: uploadErr } = await supabase.storage
-          .from("cake-notes")
-          .upload(path, noteImageFile, { upsert: true, contentType: noteImageFile.type });
-        if (uploadErr) throw uploadErr;
-        const { data: pub } = supabase.storage.from("cake-notes").getPublicUrl(path);
-        // Use render transformation to constrain width and compress for clarity/speed
-        const base = pub.publicUrl;
-        uploadedUrl = `${base}?width=720&quality=80&resize=contain`;
-      } catch {
-        // ignore upload errors to not block saving core data
+      let uploadedUrl = noteImageUrl;
+      if (noteImageFile) {
+        try {
+          const supabase = getSupabaseClient();
+          const { data: sessionResult } = await supabase.auth.getSession();
+          const userId = sessionResult?.session?.user?.id ?? "anon";
+          const ext = noteImageFile.name.split(".").pop() || "jpg";
+          const path = `${userId}/${initial.id}/note-${Date.now()}.${ext}`;
+          const { error: uploadErr } = await supabase.storage
+            .from("cake-notes")
+            .upload(path, noteImageFile, { upsert: true, contentType: noteImageFile.type });
+          if (uploadErr) throw uploadErr;
+          const { data: pub } = supabase.storage.from("cake-notes").getPublicUrl(path);
+          // Use render transformation to constrain width and compress for clarity/speed
+          const base = pub.publicUrl;
+          uploadedUrl = `${base}?width=720&quality=80&resize=contain`;
+        } catch {
+          // ignore upload errors to not block saving core data
+        }
       }
-    }
 
-    const profile = await saveCakeProfileRemote({
-      id: initial.id,
-      name: initial.name,
-      inputs: {
-        ingredients,
-        additionalCosts,
-        numberOfCakes,
-        profitPercentage,
-        profitMode,
-        profitFixedAmount,
-      },
-      instructions,
-      preservationNotes,
-      noteImageUrl: uploadedUrl ?? undefined,
-    });
-    setCakeName(profile.name);
-    setCurrentProfileId(profile.id);
-    setNoteImageUrl(profile.noteImageUrl);
-    setSaveStatus("Saved");
-    window.setTimeout(() => setSaveStatus(null), 2000);
+      const finalPayload = {
+        id: initial.id,
+        name: initial.name,
+        inputs: baseInputs,
+        instructions,
+        preservationNotes,
+        noteImageUrl: uploadedUrl ?? undefined,
+      };
+      const profile = await saveCakeProfileRemote(finalPayload);
+      setCakeName(profile.name);
+      setCurrentProfileId(profile.id);
+      setNoteImageUrl(profile.noteImageUrl);
+      setSaveStatus("Saved");
+      // Mark last saved signature and clear one-time file to avoid repeat uploads
+      lastSavedSignatureRef.current = JSON.stringify({
+        name: finalPayload.name,
+        inputs: finalPayload.inputs,
+        instructions: finalPayload.instructions,
+        preservationNotes: finalPayload.preservationNotes,
+        noteImageUrl: finalPayload.noteImageUrl,
+      });
+      setNoteImageFile(null);
+      window.setTimeout(() => setSaveStatus(null), 2000);
+    } catch {
+      setSaveStatus(null);
+    }
   }
 
   // Removed local-storage sync and background pull
@@ -325,7 +336,25 @@ function HomeContent() {
   // Load a profile from URL if id is provided
   useEffect(() => {
     const id = params?.get("id");
-    if (!id) return;
+    if (!id) {
+      // Initialize autosave baseline for a new, empty profile
+      window.setTimeout(() => {
+        if (!isReadyToAutosaveRef.current) {
+          const signature = JSON.stringify({
+            name: (cakeName.trim() || "Untitled Cake"),
+            inputs: { ingredients, additionalCosts, numberOfCakes, profitPercentage, profitMode, profitFixedAmount },
+            instructions,
+            preservationNotes,
+            noteImageUrl: noteImageUrl ?? undefined,
+          });
+          lastSavedSignatureRef.current = signature;
+          isReadyToAutosaveRef.current = true;
+        }
+      }, 0);
+      return;
+    }
+    // Suspend autosave while loading an existing profile
+    isReadyToAutosaveRef.current = false;
     (async () => {
       try {
         const p = await getCakeProfileRemote(id);
@@ -345,6 +374,19 @@ function HomeContent() {
         setNoteImageUrl(p.noteImageUrl || undefined);
       } catch {
         // ignore
+      } finally {
+        // After state flushes, record baseline signature and re-enable autosave
+        window.setTimeout(() => {
+          const signature = JSON.stringify({
+            name: (cakeName.trim() || "Untitled Cake"),
+            inputs: { ingredients, additionalCosts, numberOfCakes, profitPercentage, profitMode, profitFixedAmount },
+            instructions,
+            preservationNotes,
+            noteImageUrl: noteImageUrl ?? undefined,
+          });
+          lastSavedSignatureRef.current = signature;
+          isReadyToAutosaveRef.current = true;
+        }, 0);
       }
     })();
   }, [params]);
@@ -375,25 +417,28 @@ function HomeContent() {
     const name = (tempName || "").trim();
     setCakeName(name);
     setIsEditingName(false);
-    const profile = await saveCakeProfileRemote({
-      id: currentProfileId || undefined,
-      name: name || "Untitled Cake",
-      inputs: {
-        ingredients,
-        additionalCosts,
-        numberOfCakes,
-        profitPercentage,
-        profitMode,
-        profitFixedAmount,
-      },
+    // Autosave effect will persist this change
+  }
+
+  // Debounced autosave on meaningful changes
+  useEffect(() => {
+    if (!isReadyToAutosaveRef.current) return;
+    const signature = JSON.stringify({
+      name: (cakeName.trim() || "Untitled Cake"),
+      inputs: { ingredients, additionalCosts, numberOfCakes, profitPercentage, profitMode, profitFixedAmount },
       instructions,
       preservationNotes,
       noteImageUrl: noteImageUrl ?? undefined,
     });
-    setCurrentProfileId(profile.id);
-    setSaveStatus("Saved");
-    window.setTimeout(() => setSaveStatus(null), 2000);
-  }
+    if (lastSavedSignatureRef.current === signature) return;
+    if (autosaveTimerRef.current != null) window.clearTimeout(autosaveTimerRef.current);
+    autosaveTimerRef.current = window.setTimeout(() => {
+      handleSave().catch(() => setSaveStatus(null));
+    }, 1000);
+    return () => {
+      if (autosaveTimerRef.current != null) window.clearTimeout(autosaveTimerRef.current);
+    };
+  }, [ingredients, additionalCosts, numberOfCakes, profitPercentage, profitMode, profitFixedAmount, cakeName, instructions, preservationNotes, noteImageUrl]);
 
 
 
@@ -409,9 +454,9 @@ function HomeContent() {
             
           </div>
           <div className="flex flex-row items-center gap-2">
-            <Button onClick={handleSave}>
-              {saveStatus === "Saved" ? "Saved" : "Save This Cake"}
-            </Button>
+            {saveStatus ? (
+              <div className="text-sm text-gray-600">{saveStatus}</div>
+            ) : null}
           </div>
         </header>
 
@@ -565,51 +610,30 @@ function HomeContent() {
 
         {activeTab === "notes" && (
           <section className="space-y-3">
-            <Card>
+            <Card className="gap-2 pb-2">
               <CardHeader>
                 <CardTitle className="text-xl">Notes</CardTitle>
               </CardHeader>
               <CardContent className="space-y-4">
-                <div className="space-y-2">
+                  <div className="space-y-4">
                   <label className="text-sm font-medium">Instructions</label>
                   <RichTextEditor
                     value={instructions}
-                    onChange={setInstructions}
+                    onChange={(v) => setInstructions(v)}
                     placeholder="Describe steps to make this cake"
                     ariaLabel="Instructions editor"
                     onUploadImage={uploadImageAndGetUrl}
                   />
                 </div>
-                <div className="space-y-2">
+                <div className="space-y-4 pt-4">
                   <label className="text-sm font-medium">Preservation Notes</label>
                   <RichTextEditor
                     value={preservationNotes}
-                    onChange={setPreservationNotes}
+                    onChange={(v) => setPreservationNotes(v)}
                     placeholder="How to preserve this cake"
                     ariaLabel="Preservation notes editor"
                     onUploadImage={uploadImageAndGetUrl}
                   />
-                </div>
-                <div className="space-y-2">
-                  <label className="text-sm font-medium">Note Image</label>
-                  {noteImageUrl ? (
-                    <div className="space-y-2">
-                      <img src={noteImageUrl} alt="Note image" className="max-h-48 rounded-md border" />
-                      <div className="flex gap-2">
-                        <Button variant="outline" onClick={() => setNoteImageUrl(undefined)}>Remove Image</Button>
-                      </div>
-                    </div>
-                  ) : null}
-                  <Input
-                    type="file"
-                    accept="image/*"
-                    onChange={(e) => setNoteImageFile(e.target.files?.[0] ?? null)}
-                  />
-                  <p className="text-xs text-gray-600">Image will upload on Save.</p>
-                </div>
-
-                <div className="flex justify-end">
-                  <Button onClick={handleSave}>{saveStatus === "Saved" ? "Saved" : "Save"}</Button>
                 </div>
               </CardContent>
             </Card>

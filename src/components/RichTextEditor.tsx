@@ -198,21 +198,23 @@ export default function RichTextEditor({ value, onChange, placeholder, ariaLabel
         <input ref={fileInputRef} type="file" accept="image/*" className="hidden" onChange={onPickFile} />
       </div>
       <style>{`.rte-content img{width:320px;max-width:100%;height:auto;border-radius:8px;image-rendering:auto}`}</style>
-      <div
-        ref={editorRef}
-        className="rte-content w-full min-h-40 rounded-md border border-gray-300 p-3 text-sm focus:outline-none focus:ring-2 focus:ring-gray-300"
-        role="textbox"
-        aria-label={ariaLabel || placeholder || "Rich text editor"}
-        contentEditable
-        suppressContentEditableWarning
-        onInput={() => onChange(editorRef.current?.innerHTML || "")}
-        onPaste={handlePaste}
-        onDrop={handleDrop}
-        onDragOver={swallowDrag}
-      />
-      {(!value || value === "<p><br></p>" || value.replace(/<[^>]*>/g, "").trim() === "") && (
-        <div className="pointer-events-none -mt-12 ml-4 text-gray-400 text-sm">{placeholder}</div>
-      )}
+      <div className="relative rounded-md border border-gray-300 p-3 text-sm focus-within:ring-2 focus-within:ring-gray-300 overflow-auto">
+        <div
+          ref={editorRef}
+          className="rte-content w-full max-w-full min-h-40 break-words outline-none"
+          role="textbox"
+          aria-label={ariaLabel || placeholder || "Rich text editor"}
+          contentEditable
+          suppressContentEditableWarning
+          onInput={() => onChange(editorRef.current?.innerHTML || "")}
+          onPaste={handlePaste}
+          onDrop={handleDrop}
+          onDragOver={swallowDrag}
+        />
+        {(!value || value === "<p><br></p>" || value.replace(/<[^>]*>/g, "").trim() === "") && (
+          <div className="pointer-events-none absolute left-3 top-3 text-gray-400 text-sm">{placeholder}</div>
+        )}
+      </div>
     </div>
   );
 }
