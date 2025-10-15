@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -36,6 +36,12 @@ export default function IngredientsCostsPage() {
   const [editAmount, setEditAmount] = useState<string>("");
   const [editUnit, setEditUnit] = useState<IngredientUnit>("g");
   const [editPrice, setEditPrice] = useState<string>("");
+
+  // Autosave refs
+  const createDebounceRef = useRef<number | null>(null);
+  const editDebounceRef = useRef<number | null>(null);
+  const lastCreateSignatureRef = useRef<string | null>(null);
+  const lastEditSignatureRef = useRef<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -102,6 +108,59 @@ export default function IngredientsCostsPage() {
   function cancelEdit() {
     setEditingId(null);
   }
+
+  // Autosave: create form → insert when valid and changed (debounced)
+  useEffect(() => {
+    if (authMissing) return;
+    const nm = (name || "").trim();
+    const amt = Math.max(0, Number((amount || "").replace(/\D/g, "")) || 0);
+    const pr = Math.max(0, Number((price || "").replace(/\D/g, "")) || 0);
+    const sig = JSON.stringify({ nm, amt, unit, pr });
+    if (!nm || amt <= 0 || pr <= 0) return; // require all fields for autosave create
+    if (lastCreateSignatureRef.current === sig) return;
+    if (createDebounceRef.current != null) window.clearTimeout(createDebounceRef.current);
+    createDebounceRef.current = window.setTimeout(async () => {
+      try {
+        await createOrUpdateIngredientCatalogItem({ name: nm, packageAmount: amt, packageUnit: unit, price: pr });
+        lastCreateSignatureRef.current = sig;
+        setName("");
+        setAmount("");
+        setUnit("g");
+        setPrice("");
+        setItems(await listIngredientCatalog());
+      } catch (e) {
+        // keep actionError UX consistent with manual handler
+        setActionError("Could not add ingredient cost. Please login and try again.");
+      }
+    }, 800);
+    return () => {
+      if (createDebounceRef.current != null) window.clearTimeout(createDebounceRef.current);
+    };
+  }, [name, amount, unit, price, authMissing]);
+
+  // Autosave: edit row → update when fields change (debounced)
+  useEffect(() => {
+    if (!editingId || authMissing) return;
+    const nm = (editName || "").trim();
+    const amt = Math.max(0, Number((editAmount || "").replace(/\D/g, "")) || 0);
+    const pr = Math.max(0, Number((editPrice || "").replace(/\D/g, "")) || 0);
+    const sig = JSON.stringify({ id: editingId, nm, amt, unit: editUnit, pr });
+    if (!nm || amt <= 0 || pr < 0) return;
+    if (lastEditSignatureRef.current === sig) return;
+    if (editDebounceRef.current != null) window.clearTimeout(editDebounceRef.current);
+    editDebounceRef.current = window.setTimeout(async () => {
+      try {
+        await createOrUpdateIngredientCatalogItem({ id: editingId, name: nm, packageAmount: amt, packageUnit: editUnit, price: pr });
+        lastEditSignatureRef.current = sig;
+        setItems(await listIngredientCatalog());
+      } catch (e) {
+        setActionError("Could not save changes. Please login and try again.");
+      }
+    }, 800);
+    return () => {
+      if (editDebounceRef.current != null) window.clearTimeout(editDebounceRef.current);
+    };
+  }, [editingId, editName, editAmount, editUnit, editPrice, authMissing]);
 
   const perUnitHints = useMemo(() => {
     const byId: Record<string, string> = {};

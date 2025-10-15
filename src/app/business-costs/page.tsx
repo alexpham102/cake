@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -47,6 +47,20 @@ export default function BusinessCostsPage() {
   const [editingOvId, setEditingOvId] = useState<string | null>(null);
   const [editOvName, setEditOvName] = useState<string>("");
   const [editOvMonthly, setEditOvMonthly] = useState<string>("");
+
+  // Autosave refs/signatures
+  const bpmDebounceRef = useRef<number | null>(null);
+  const lastBpmSignatureRef = useRef<number | null>(null);
+
+  const eqCreateDebounceRef = useRef<number | null>(null);
+  const eqEditDebounceRef = useRef<number | null>(null);
+  const lastEqCreateSignatureRef = useRef<string | null>(null);
+  const lastEqEditSignatureRef = useRef<string | null>(null);
+
+  const ovCreateDebounceRef = useRef<number | null>(null);
+  const ovEditDebounceRef = useRef<number | null>(null);
+  const lastOvCreateSignatureRef = useRef<string | null>(null);
+  const lastOvEditSignatureRef = useRef<string | null>(null);
 
   useEffect(() => {
     (async () => {
@@ -148,6 +162,123 @@ export default function BusinessCostsPage() {
     await upsertBusinessSettings(bpm);
     setBatchesPerMonth(bpm);
   }
+
+  // Autosave: batches per month (settings)
+  useEffect(() => {
+    if (authMissing) return;
+    if (lastBpmSignatureRef.current === batchesPerMonth) return;
+    if (bpmDebounceRef.current != null) window.clearTimeout(bpmDebounceRef.current);
+    bpmDebounceRef.current = window.setTimeout(async () => {
+      try {
+        await upsertBusinessSettings(batchesPerMonth);
+        lastBpmSignatureRef.current = batchesPerMonth;
+      } catch {
+        // ignore
+      }
+    }, 800);
+    return () => {
+      if (bpmDebounceRef.current != null) window.clearTimeout(bpmDebounceRef.current);
+    };
+  }, [batchesPerMonth, authMissing]);
+
+  // Autosave: equipment create form
+  useEffect(() => {
+    if (authMissing) return;
+    const name = (eqName || "").trim();
+    const price = Number((eqPrice || "").replace(/\D/g, "")) || 0;
+    const batches = Math.floor(Number((eqBatches || "").replace(/\D/g, "")) || 0);
+    const sig = JSON.stringify({ name, price, batches });
+    if (!name) return;
+    if (lastEqCreateSignatureRef.current === sig) return;
+    if (eqCreateDebounceRef.current != null) window.clearTimeout(eqCreateDebounceRef.current);
+    eqCreateDebounceRef.current = window.setTimeout(async () => {
+      try {
+        await createOrUpdateEquipment({ name, price, expectedTotalBatches: batches });
+        lastEqCreateSignatureRef.current = sig;
+        setEqName("");
+        setEqPrice("");
+        setEqBatches("");
+        setEquipment(await listEquipment());
+      } catch {
+        // ignore
+      }
+    }, 800);
+    return () => {
+      if (eqCreateDebounceRef.current != null) window.clearTimeout(eqCreateDebounceRef.current);
+    };
+  }, [eqName, eqPrice, eqBatches, authMissing]);
+
+  // Autosave: equipment edit row
+  useEffect(() => {
+    if (!editingEqId || authMissing) return;
+    const name = (editEqName || "").trim();
+    const price = Number((editEqPrice || "").replace(/\D/g, "")) || 0;
+    const batches = Math.floor(Number((editEqBatches || "").replace(/\D/g, "")) || 0);
+    if (!name) return;
+    const sig = JSON.stringify({ id: editingEqId, name, price, batches });
+    if (lastEqEditSignatureRef.current === sig) return;
+    if (eqEditDebounceRef.current != null) window.clearTimeout(eqEditDebounceRef.current);
+    eqEditDebounceRef.current = window.setTimeout(async () => {
+      try {
+        await createOrUpdateEquipment({ id: editingEqId, name, price, expectedTotalBatches: batches });
+        lastEqEditSignatureRef.current = sig;
+        setEquipment(await listEquipment());
+      } catch {
+        // ignore
+      }
+    }, 800);
+    return () => {
+      if (eqEditDebounceRef.current != null) window.clearTimeout(eqEditDebounceRef.current);
+    };
+  }, [editingEqId, editEqName, editEqPrice, editEqBatches, authMissing]);
+
+  // Autosave: overhead create form
+  useEffect(() => {
+    if (authMissing) return;
+    const name = (ovName || "").trim();
+    const monthlyAmount = Number((ovMonthly || "").replace(/\D/g, "")) || 0;
+    const sig = JSON.stringify({ name, monthlyAmount });
+    if (!name) return;
+    if (lastOvCreateSignatureRef.current === sig) return;
+    if (ovCreateDebounceRef.current != null) window.clearTimeout(ovCreateDebounceRef.current);
+    ovCreateDebounceRef.current = window.setTimeout(async () => {
+      try {
+        await createOrUpdateOverhead({ name, monthlyAmount });
+        lastOvCreateSignatureRef.current = sig;
+        setOvName("");
+        setOvMonthly("");
+        setOverheads(await listOverheads());
+      } catch {
+        // ignore
+      }
+    }, 800);
+    return () => {
+      if (ovCreateDebounceRef.current != null) window.clearTimeout(ovCreateDebounceRef.current);
+    };
+  }, [ovName, ovMonthly, authMissing]);
+
+  // Autosave: overhead edit row
+  useEffect(() => {
+    if (!editingOvId || authMissing) return;
+    const name = (editOvName || "").trim();
+    const monthlyAmount = Number((editOvMonthly || "").replace(/\D/g, "")) || 0;
+    if (!name) return;
+    const sig = JSON.stringify({ id: editingOvId, name, monthlyAmount });
+    if (lastOvEditSignatureRef.current === sig) return;
+    if (ovEditDebounceRef.current != null) window.clearTimeout(ovEditDebounceRef.current);
+    ovEditDebounceRef.current = window.setTimeout(async () => {
+      try {
+        await createOrUpdateOverhead({ id: editingOvId, name, monthlyAmount });
+        lastOvEditSignatureRef.current = sig;
+        setOverheads(await listOverheads());
+      } catch {
+        // ignore
+      }
+    }, 800);
+    return () => {
+      if (ovEditDebounceRef.current != null) window.clearTimeout(ovEditDebounceRef.current);
+    };
+  }, [editingOvId, editOvName, editOvMonthly, authMissing]);
 
   if (loading) {
     return <div className="p-6 text-sm text-gray-500">Loading…</div>;
